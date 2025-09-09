@@ -9,10 +9,210 @@ import numpy as np
 
 # Import VTK with error handling
 from tcdlibx.utils.vtk_utils import vtk
-
 from tcdlibx.calc.cube_manip import CubeData, VecCubeData
-from tcdlibx.graph.helpers import MyvtkActor
+from tcdlibx.graph.helpers import MyvtkActor, fibonacci_spiral_samples_on_unit_sphere
 # from math import ceil
+
+def draw_tensor_spheres(positions: np.ndarray, 
+                       tensors: np.ndarray,
+                       sphere_radius: float = 0.5,
+                       nb_sphere_samples: int = 50,
+                       vector_scale: float = 0.3,
+                       opacity: float = 0.8,
+                       show_spheres: bool = True,
+                       weights: tp.Optional[np.ndarray] = None,
+                       color_scheme: str = 'magnitude') -> MyvtkActor:
+    """
+    Visualize 3x3 tensors at given positions as vectors on unit spheres.
+    
+    Args:
+        positions (np.ndarray): Array of shape (N, 3) with tensor positions
+        tensors (np.ndarray): Array of shape (N, 3, 3) with 3x3 tensors
+        sphere_radius (float): Radius of the visualization spheres
+        nb_sphere_samples (int): Number of fibonacci samples on each sphere
+        vector_scale (float): Scale factor for the vectors
+        opacity (float): Opacity of the spheres
+        show_spheres (bool): Whether to show the underlying spheres
+        color_scheme (str): Color scheme for vectors ('magnitude', 'direction', 'uniform')
+        
+    Returns:
+        MyvtkActor: VTK actor containing the tensor visualization
+    """
+    
+    if positions.shape[0] != tensors.shape[0]:
+        raise ValueError("Number of positions must match number of tensors")
+    
+    if tensors.shape[1:] != (3, 3):
+        raise ValueError("Tensors must be 3x3 matrices")
+    
+    # Generate fibonacci samples on unit sphere
+    unit_sphere_points = fibonacci_spiral_samples_on_unit_sphere(nb_sphere_samples)
+    
+    # Prepare arrays for all vectors across all atoms
+    all_points = []
+    all_vectors = []
+    all_scalars = []
+    
+    for atom_idx, (pos, tensor) in enumerate(zip(positions, tensors)):
+        # Scale sphere points by radius and translate to atom position
+        sphere_points = unit_sphere_points * sphere_radius + pos
+        
+        # Apply tensor to each unit vector to get the vector field
+        tensor_vectors = np.zeros_like(sphere_points)
+        for i, unit_vec in enumerate(unit_sphere_points):
+            tensor_vectors[i] = np.dot(tensor, unit_vec)
+        
+        # Calculate scalars for coloring
+        if color_scheme == 'magnitude':
+            scalars = np.linalg.norm(tensor_vectors, axis=1)
+        elif color_scheme == 'weight_mag':
+            if weights is None:
+                raise ValueError("Weights must be provided for 'weight_mag' color scheme")
+            scalars = np.linalg.norm(tensor_vectors, axis=1)/np.sqrt(weights[atom_idx])
+        else:  # uniform
+            scalars = np.ones(nb_sphere_samples)
+        
+        all_points.extend(sphere_points)
+        all_vectors.extend(tensor_vectors)
+        all_scalars.extend(scalars)
+    
+    # Convert to numpy arrays
+    all_points = np.array(all_points)
+    all_vectors = np.array(all_vectors)
+    all_scalars = np.array(all_scalars)
+    
+    # Create polydata with all vectors
+    polydata = create_vector_field_polydata(
+        all_points, 
+        all_vectors, 
+        all_scalars, 
+        vector_name='tensor_vectors',
+        scalar_name=color_scheme
+    )
+    
+    # Create arrows for vector visualization
+    arrow = vtk.vtkArrowSource()
+    arrow.SetTipResolution(12)
+    arrow.SetShaftResolution(12)
+    
+    # Create glyphs
+    glyphs = vtk.vtkGlyph3D()
+    glyphs.SetInputData(polydata)
+    glyphs.SetSourceConnection(arrow.GetOutputPort())
+    glyphs.SetVectorModeToUseVector()
+    glyphs.SetScaleModeToScaleByScalar()
+    glyphs.SetScaleFactor(vector_scale)
+    glyphs.SetColorModeToColorByScalar()
+    
+    # Create mapper
+    mapper = vtk.vtkPolyDataMapper()
+    mapper.SetInputConnection(glyphs.GetOutputPort())
+    
+    # Set up color mapping
+    if color_scheme == 'magnitude' or color_scheme == 'weight_mag':
+        # Create a color lookup table
+        lut = vtk.vtkColorTransferFunction()
+        
+        # Get the scalar range for proper color mapping
+        scalar_min = np.min(all_scalars)
+        scalar_max = np.max(all_scalars)
+        scalar_range = scalar_max - scalar_min
+        
+        if scalar_range > 0:
+            # Map colors based on actual scalar range
+            lut.AddRGBPoint(scalar_min, 0, 0, 1)                    # Blue for minimum
+            lut.AddRGBPoint(scalar_min + 0.5 * scalar_range, 0, 1, 0)  # Green for medium
+            lut.AddRGBPoint(scalar_max, 1, 0, 0)                    # Red for maximum
+        else:
+            # Fallback if all scalars are the same
+            lut.AddRGBPoint(scalar_min, 0, 1, 0)  # Green for uniform values
+        
+        mapper.SetLookupTable(lut)
+        # Set the scalar range for the mapper
+        mapper.SetScalarRange(scalar_min, scalar_max)
+    else:  # uniform
+        mapper.ScalarVisibilityOff()
+    
+    # Create actor
+    actor = vtk.vtkActor()
+    actor.SetMapper(mapper)
+    actor.GetProperty().SetOpacity(opacity)
+    
+    return MyvtkActor(actor, glyphs)
+
+
+def draw_molecular_tensors(mol_data, 
+                          tensor_type: str = 'apt',
+                          sphere_radius: float = 0.5,
+                          nb_sphere_samples: int = 50,
+                          vector_scale: float = 2,
+                          opacity: float = 0.8,
+                          color_scheme: str = 'magnitude') -> MyvtkActor:
+    """
+    Convenience function to visualize molecular tensors from VibMolecule data.
+    
+    Args:
+        mol_data: VibMolecule (or object with compatible interface)
+        tensor_type (str): Type of tensor to visualize ('apt' or 'aat')
+        sphere_radius (float): Radius of the visualization spheres
+        nb_sphere_samples (int): Number of fibonacci samples on each sphere
+        vector_scale (float): Scale factor for the vectors
+        opacity (float): Opacity of the visualization
+        color_scheme (str): Color scheme for vectors ('magnitude', 'direction', 'uniform')
+        
+    Returns:
+        MyvtkActor: VTK actor containing the tensor visualization
+    """
+    
+    # Check if object has required attributes
+    if not hasattr(mol_data, 'crd') or not hasattr(mol_data, '_moldata'):
+        raise ValueError("mol_data must have 'crd' and '_moldata' attributes")
+    
+    # Get atomic positions
+    positions = mol_data.crd
+    natoms = positions.shape[0]
+    
+    # Get tensor data
+    if tensor_type.lower() == 'apt':
+        if mol_data.apt is None:
+            raise ValueError("APT tensor data not available in molecule")
+        # APT tensors are stored as (natoms*3, 3) - reshape to (natoms, 3, 3)
+        apt_data = mol_data.apt
+        if apt_data.ndim == 2:
+            # Reshape from (natoms*3, 3) to (natoms, 3, 3)
+            natoms = len(positions)
+            tensors = apt_data.reshape(natoms, 3, 3)
+        else:
+            tensors = apt_data
+    elif tensor_type.lower() == 'aat':
+        if mol_data.aat is None:
+            raise ValueError("AAT tensor data not available in molecule")
+        # AAT tensors are stored as (natoms*3, 3) - reshape to (natoms, 3, 3)
+        aat_data = mol_data.aat
+        if aat_data.ndim == 2:
+            # Reshape from (natoms*3, 3) to (natoms, 3, 3)
+            natoms = len(positions)
+            tensors = aat_data.reshape(natoms, 3, 3)
+        else:
+            tensors = aat_data
+    else:
+        raise ValueError("tensor_type must be 'apt' or 'aat'")
+    if color_scheme == 'weight_mag':
+        masses = mol_data.atmas
+    else:
+        masses = None
+    
+    return draw_tensor_spheres(
+        positions=positions,
+        tensors=tensors,
+        sphere_radius=sphere_radius,
+        nb_sphere_samples=nb_sphere_samples,
+        vector_scale=vector_scale,
+        opacity=opacity,
+        weights=masses,
+        color_scheme=color_scheme
+    )
+
 
 def dots2vtkarray(dots: np.ndarray) -> vtk.vtkPolyData:
     points1 = vtk.vtkPoints()

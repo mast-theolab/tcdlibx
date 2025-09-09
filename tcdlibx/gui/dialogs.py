@@ -393,6 +393,134 @@ class QuiverSetupDialog(QDialog):
         self._subsamp = self._subsampline._getvalue()
 
 
+class TensorSetupDialog(QDialog):
+    """Dialog for setting up tensor visualization parameters
+
+    Args:
+        QDialog: Qt dialog base class
+    """
+
+    def __init__(self,
+                 sphere_radius: float = 0.5,
+                 nb_sphere_samples: int = 50,
+                 vector_scale: float = 2.0,
+                 opacity: float = 0.8,
+                 color_scheme: str = 'weight_mag',
+                 parent: tp.Optional[tp.Union[QDialog, None]] = None) -> None:
+        """Initialize the tensor setup dialog.
+
+        Args:
+            sphere_radius: Radius of the visualization spheres
+            nb_sphere_samples: Number of fibonacci samples on each sphere
+            vector_scale: Scale factor for the vectors
+            opacity: Opacity of the visualization
+            color_scheme: Color scheme for vectors ('magnitude', 'weight_mag', 'uniform')
+            parent: Parent dialog (optional)
+        """
+        super().__init__(parent)
+        
+        # Store initial values
+        self._sphere_radius = sphere_radius
+        self._nb_sphere_samples = nb_sphere_samples
+        self._vector_scale = vector_scale
+        self._opacity = opacity
+        self._color_scheme = color_scheme
+        
+        self.setWindowTitle("Tensor Visualization Setup")
+        
+        # Main layout
+        self.vlay = QVBoxLayout()
+        grid = QGridLayout()
+        self.vlay.addLayout(grid)
+        
+        # Sphere radius
+        radius_valid = QDoubleValidator()
+        radius_valid.setLocale(QLocale('English'))
+        radius_valid.setRange(0.1, 5.0)
+        self._radius_line = EditDoubleLine("Sphere radius", sphere_radius, radius_valid)
+        grid.addLayout(self._radius_line._hlay, 0, 0)
+        
+        # Number of sphere samples
+        samples_valid = QIntValidator()
+        samples_valid.setLocale(QLocale('English'))
+        samples_valid.setRange(10, 200)
+        self._samples_line = EditIntLine("Number of sphere samples", nb_sphere_samples, samples_valid)
+        grid.addLayout(self._samples_line._hlay, 1, 0)
+        
+        # Vector scale
+        scale_valid = QDoubleValidator()
+        scale_valid.setLocale(QLocale('English'))
+        scale_valid.setRange(0.1, 20.0)
+        self._scale_line = EditDoubleLine("Vector scale factor", vector_scale, scale_valid)
+        grid.addLayout(self._scale_line._hlay, 2, 0)
+        
+        # Opacity
+        opacity_valid = QDoubleValidator()
+        opacity_valid.setLocale(QLocale('English'))
+        opacity_valid.setRange(0.1, 1.0)
+        self._opacity_line = EditDoubleLine("Opacity", opacity, opacity_valid)
+        grid.addLayout(self._opacity_line._hlay, 3, 0)
+        
+        # Color scheme
+        color_label = QLabel("Color scheme:")
+        self._color_combo = QComboBox()
+        self._color_combo.addItems(['magnitude', 'weight_mag', 'uniform'])
+        self._color_combo.setCurrentText(color_scheme)
+        self._color_combo.currentTextChanged.connect(self._setcolorscheme)
+        
+        color_hlay = QHBoxLayout()
+        color_hlay.addWidget(color_label)
+        color_hlay.addWidget(self._color_combo)
+        grid.addLayout(color_hlay, 4, 0)
+        
+        # Dialog buttons
+        QBtn = QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        self.buttonBox = QDialogButtonBox(QBtn)
+        self.buttonBox.accepted.connect(self.accept)
+        self.accepted.connect(self._setvals)
+        self.buttonBox.rejected.connect(self.reject)
+        
+        self.vlay.addWidget(self.buttonBox)
+        self.setLayout(self.vlay)
+    
+    def _setvals(self):
+        """Set the values from the dialog controls."""
+        self._sphere_radius = self._radius_line._getvalue()
+        self._nb_sphere_samples = self._samples_line._getvalue()
+        self._vector_scale = self._scale_line._getvalue()
+        self._opacity = self._opacity_line._getvalue()
+        # color_scheme is already set by the combo box callback
+    
+    def _setcolorscheme(self):
+        """Set the color scheme from the combo box."""
+        self._color_scheme = self._color_combo.currentText()
+    
+    @property
+    def sphere_radius(self) -> float:
+        """Get the sphere radius value."""
+        return self._sphere_radius
+    
+    @property
+    def nb_sphere_samples(self) -> int:
+        """Get the number of sphere samples."""
+        return self._nb_sphere_samples
+    
+    @property
+    def vector_scale(self) -> float:
+        """Get the vector scale factor."""
+        return self._vector_scale
+    
+    @property
+    def opacity(self) -> float:
+        """Get the opacity value."""
+        return self._opacity
+    
+    @property
+    def color_scheme(self) -> str:
+        """Get the color scheme."""
+        return self._color_scheme
+
+
 class StreamLineSetupDialog(QDialog):
     """Dialog for setting up stream lines
 

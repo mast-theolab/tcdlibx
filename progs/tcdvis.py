@@ -27,7 +27,7 @@ from tcdlibx.calc.cube_manip import VecCubeData, VtcdData, cube_parser
 from tcdlibx.graph.helpers import EleMolecule, VibMolecule, filtervecatom
 import tcdlibx.graph.cube_graphvtk as cubetk
 from tcdlibx.gui.dialogs import (
-    SavePngDialog, SavePngSeriesDialog, StreamLineSetupDialog, TCDDialog, QuiverSetupDialog
+    SavePngDialog, SavePngSeriesDialog, StreamLineSetupDialog, TCDDialog, QuiverSetupDialog, TensorSetupDialog
 )
 from tcdlibx.io.estp_io import PHYSFACT, get_elemol, get_vibmol
 from tcdlibx.io.jsonio import read_json
@@ -99,7 +99,12 @@ class TCDvis(QMainWindow):
                                     'num_particles': 15,
                                     'particle_type': 'sphere'},
                          'quiver': {'scale': 100,
-                                   'subsample': 5},}
+                                   'subsample': 5},
+                         'tensor': {'sphere_radius': 0.5,
+                                    'nb_sphere_samples': 50,
+                                    'vector_scale': 1.0,
+                                    'opacity': 0.8,
+                                    'color_scheme': 'weight_mag'}}
 
         self.initUI()
 
@@ -169,6 +174,34 @@ class TCDvis(QMainWindow):
         nmRevert.setEnabled(True)
         nmmenu.addAction(nmRevert)
         self._menus['mol']['nm']['revert'] = nmRevert
+        # Tensor visualization
+        tenmenu = fileMol.addMenu('Tensors Vis.')
+        tenmenu.setEnabled(False)
+        self._menus['mol']['ten'] = {}
+        self._menus['mol']['ten']['menu'] = tenmenu
+        aptButton = QAction(QIcon(''), 'APT', self)
+        aptButton.setStatusTip('Display the atomic polar tensors from fchk')
+        aptButton.setCheckable(True)
+        aptButton.triggered.connect(self.showapt)
+        tenmenu.addAction(aptButton)
+        self._menus['mol']['ten']['apt'] = aptButton
+        aatButton = QAction(QIcon(''), 'AAT', self)
+        aatButton.setStatusTip('Display the atomic axial tensors from fchk')
+        aatButton.setCheckable(True)
+        aatButton.triggered.connect(self.showaat)
+        tenmenu.addAction(aatButton)
+        self._menus['mol']['ten']['aat'] = aatButton
+        settButton = QAction(QIcon(''), 'Settings', self)
+        settButton.setStatusTip('Open tensor settings')
+        settButton.triggered.connect(self.tensor_settings)
+        tenmenu.addAction(settButton)
+        self._menus['mol']['ten']['settings'] = settButton
+        nomtButton = QAction(QIcon(''), 'Clear', self)
+        nomtButton.setStatusTip('remove all tensor vectors')
+        nomtButton.triggered.connect(self.cleartens)
+        tenmenu.addAction(nomtButton)
+        self._menus['mol']['ten']['clear'] = nomtButton
+
         # Ele. DMT
         fileEDmt = fileMol.addMenu('Ele. DTMs')
         fileEDmt.setEnabled(False) 
@@ -539,7 +572,10 @@ class TCDvis(QMainWindow):
         for val in self._menus['mol']:
             #print(val)
             if not val == 'nm' and val not in 'dmt':
-                self._menus['mol'][val].setEnabled(True)
+                if isinstance(self._menus['mol'][val], dict):
+                    self._menus['mol'][val]['menu'].setEnabled(True)
+                else:
+                    self._menus['mol'][val].setEnabled(True)
             elif self._moltype == 'vib':
                 self._menus['mol']['nm']['menu'].setEnabled(True)
                 self._menus['vibdmt']['menu'].setEnabled(True)
@@ -898,6 +934,68 @@ class TCDvis(QMainWindow):
                                                          np.array(veccmp),
                                                          np.array(vectyp)) 
             self.ren.AddActor(self._actors['mfpdtm'].actor)
+        self._updatereder()
+
+    def _showtensors(self, ttype="apt"):
+        self.cleartens(key=ttype)
+        self._actors['tensor'] = cubetk.draw_molecular_tensors(
+            self._fchk,
+            tensor_type=ttype,
+            sphere_radius=self._default['tensor']['sphere_radius'],
+            nb_sphere_samples=self._default['tensor']['nb_sphere_samples'],
+            vector_scale=self._default['tensor']['vector_scale'],
+            opacity=self._default['tensor']['opacity'],
+            color_scheme=self._default['tensor']['color_scheme']
+        )
+        self.ren.AddActor(self._actors['tensor'].actor)
+        self._updatereder()
+
+    def showapt(self):
+        if not self._menus['mol']['ten']['apt'].isChecked():
+            self.cleartens(key='apt')
+        else:
+            self._showtensors(ttype='apt')
+
+    def showaat(self):
+        if not self._menus['mol']['ten']['aat'].isChecked():
+            self.cleartens(key='aat')
+        else:
+            self._showtensors(ttype='aat')
+
+    def tensor_settings(self):
+        tensprm = TensorSetupDialog(sphere_radius=self._default['tensor']['sphere_radius'],
+                                    nb_sphere_samples=self._default['tensor']['nb_sphere_samples'],
+                                    vector_scale=self._default['tensor']['vector_scale'],
+                                    opacity=self._default['tensor']['opacity'],
+                                    color_scheme=self._default['tensor']['color_scheme'],)
+        tensprm.exec()
+        # Update the default values
+        self._default['tensor']['sphere_radius'] = tensprm._sphere_radius
+        self._default['tensor']['nb_sphere_samples'] = tensprm._nb_sphere_samples
+        self._default['tensor']['vector_scale'] = tensprm._vector_scale
+        self._default['tensor']['opacity'] = tensprm._opacity
+        self._default['tensor']['color_scheme'] = tensprm._color_scheme
+        if 'tensor' in self._actors:
+            self.ren.RemoveActor(self._actors['tensor'].actor)
+            self._actors.pop('tensor')
+            if self._menus['mol']['ten']['apt'].isChecked():
+                self._showtensors(ttype='apt')
+            elif self._menus['mol']['ten']['aat'].isChecked():
+                self._showtensors(ttype='aat')
+
+
+    def cleartens(self, key=None):
+        if 'tensor' in self._actors:
+            self.ren.RemoveActor(self._actors['tensor'].actor)
+            self._actors.pop('tensor')
+        if key is None:
+            for key in self._menus['mol']['ten']:
+                if key != 'menu' and key != 'settings':
+                    self._menus['mol']['ten'][key].setChecked(False)
+        else:
+            for keym in self._menus['mol']['ten']:
+                if keym != 'menu' and keym != key and keym != 'settings':
+                    self._menus['mol']['ten'][keym].setChecked(False)
         self._updatereder()
 
     def showtcdmt(self):

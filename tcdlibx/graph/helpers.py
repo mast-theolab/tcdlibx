@@ -160,6 +160,14 @@ class VibMolecule(Molecule):
     def ntrans(self) -> int:
         return self._nvib
 
+    @property
+    def apt(self) -> np.ndarray:
+        return self._moldata['apt']
+    
+    @property
+    def aat(self) -> np.ndarray:
+        return self._moldata['aat']
+
     def _nuctens(self):
         nuc_tens = nuclear_tensors(np.array(self.atnum),
                                    self.crd)
@@ -405,3 +413,33 @@ class MyvtkActor():
     def GetCenter(self):
         """Get the center of the actor"""
         return self._actor.GetCenter()
+
+def fibonacci_spiral_samples_on_unit_sphere(nb_samples, mode=0):
+    """
+    Generate points on a unit sphere using Fibonacci spiral sampling.
+    Taken from:
+    https://github.com/matt77hias/fibpy/blob/master/src/sampling.py
+    
+    Args:
+        nb_samples (int): Number of sample points on the sphere
+        mode (int): Sampling mode (0 for deterministic, other for random shift)
+        
+    Returns:
+        np.ndarray: Array of shape (nb_samples, 3) with unit sphere coordinates
+    """
+    shift = 1.0 if mode == 0 else nb_samples * np.random.random()
+ 
+    ga = np.pi * (3.0 - np.sqrt(5.0))
+    offset = 2.0 / nb_samples
+    
+    ss = np.zeros((nb_samples, 3))
+    j = 0
+    for i in range(nb_samples):
+        phi = ga * ((i + shift) % nb_samples)
+        cos_phi = np.cos(phi)
+        sin_phi = np.sin(phi)
+        cos_theta = ((i + 0.5) * offset) - 1.0
+        sin_theta = np.sqrt(1.0 - cos_theta * cos_theta)
+        ss[j, :] = np.array([cos_phi * sin_theta, sin_phi * sin_theta, cos_theta])
+        j += 1
+    return ss
