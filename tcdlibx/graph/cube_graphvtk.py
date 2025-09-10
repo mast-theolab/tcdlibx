@@ -133,12 +133,42 @@ def draw_tensor_spheres(positions: np.ndarray,
     else:  # uniform
         mapper.ScalarVisibilityOff()
     
-    # Create actor
-    actor = vtk.vtkActor()
-    actor.SetMapper(mapper)
-    actor.GetProperty().SetOpacity(opacity)
+    # Create actor for vectors
+    vector_actor = vtk.vtkActor()
+    vector_actor.SetMapper(mapper)
+    vector_actor.GetProperty().SetOpacity(opacity)
     
-    return MyvtkActor(actor, glyphs)
+    # Create sphere actors if requested
+    if show_spheres:
+        # Create spheres at tensor positions
+        sphere_points = dots2vtkarray(positions)
+        
+        sphere_source = vtk.vtkSphereSource()
+        sphere_source.SetRadius(sphere_radius * 1) # Change 1 to scale the spheres
+        sphere_source.SetPhiResolution(16)
+        sphere_source.SetThetaResolution(16)
+        
+        sphere_glyph = vtk.vtkGlyph3D()
+        sphere_glyph.SetInputData(sphere_points)
+        sphere_glyph.SetSourceConnection(sphere_source.GetOutputPort())
+        sphere_glyph.Update()
+        
+        sphere_mapper = vtk.vtkPolyDataMapper()
+        sphere_mapper.SetInputConnection(sphere_glyph.GetOutputPort())
+        
+        sphere_actor = vtk.vtkActor()
+        sphere_actor.SetMapper(sphere_mapper)
+        sphere_actor.GetProperty().SetColor(1.0, 1.0, 0.6)  # Pale yellow
+        sphere_actor.GetProperty().SetOpacity(0.3)
+        
+        # Create an assembly to combine both actors
+        assembly = vtk.vtkAssembly()
+        assembly.AddPart(vector_actor)
+        assembly.AddPart(sphere_actor)
+        
+        return MyvtkActor(assembly, glyphs)
+    else:
+        return MyvtkActor(vector_actor, glyphs)
 
 
 def draw_molecular_tensors(mol_data, 
@@ -147,7 +177,9 @@ def draw_molecular_tensors(mol_data,
                           nb_sphere_samples: int = 50,
                           vector_scale: float = 2,
                           opacity: float = 0.8,
-                          color_scheme: str = 'magnitude') -> MyvtkActor:
+                          color_scheme: str = 'magnitude',
+                          atom_filter: tp.Optional[tp.List[str]] = None,
+                          show_spheres: bool = False) -> MyvtkActor:
     """
     Convenience function to visualize molecular tensors from VibMolecule data.
     
@@ -158,19 +190,50 @@ def draw_molecular_tensors(mol_data,
         nb_sphere_samples (int): Number of fibonacci samples on each sphere
         vector_scale (float): Scale factor for the vectors
         opacity (float): Opacity of the visualization
-        color_scheme (str): Color scheme for vectors ('magnitude', 'direction', 'uniform')
+        color_scheme (str): Color scheme for vectors ('magnitude', 'weight_mag', 'uniform')
+        atom_filter (list): List of atomic symbols to filter (e.g., ['C', 'N', 'O'])
+        show_spheres (bool): Whether to show pale yellow spheres at tensor positions
         
     Returns:
         MyvtkActor: VTK actor containing the tensor visualization
     """
     
+    # Import ELEMENTS for atomic symbol lookup
+    from tcdlibx.utils.mol_data import ELEMENTS
+    
     # Check if object has required attributes
     if not hasattr(mol_data, 'crd') or not hasattr(mol_data, '_moldata'):
         raise ValueError("mol_data must have 'crd' and '_moldata' attributes")
     
-    # Get atomic positions
+    # Get atomic positions and numbers
     positions = mol_data.crd
+    atomic_numbers = mol_data.atnum
     natoms = positions.shape[0]
+    
+    # Create atom filter mask if atom_filter is provided
+    if atom_filter is not None:
+        # Convert atomic symbols to atomic numbers
+        filter_atomic_numbers = []
+        for symbol in atom_filter:
+            try:
+                # Find the atomic number for this symbol
+                atomic_number = ELEMENTS.index(symbol)
+                filter_atomic_numbers.append(atomic_number)
+            except ValueError:
+                raise ValueError(f"Unknown atomic symbol: {symbol}")
+        
+        # Create mask for atoms that match the filter
+        atom_mask = np.isin(atomic_numbers, filter_atomic_numbers)
+        
+        if not atom_mask.any():
+            raise ValueError(f"No atoms found matching the filter: {atom_filter}")
+        
+        # Filter positions
+        filtered_positions = positions[atom_mask]
+    else:
+        # No filter, use all atoms
+        atom_mask = np.ones(natoms, dtype=bool)
+        filtered_positions = positions
     
     # Get tensor data
     if tensor_type.lower() == 'apt':
@@ -180,10 +243,9 @@ def draw_molecular_tensors(mol_data,
         apt_data = mol_data.apt
         if apt_data.ndim == 2:
             # Reshape from (natoms*3, 3) to (natoms, 3, 3)
-            natoms = len(positions)
-            tensors = apt_data.reshape(natoms, 3, 3)
+            full_tensors = apt_data.reshape(natoms, 3, 3)
         else:
-            tensors = apt_data
+            full_tensors = apt_data
     elif tensor_type.lower() == 'aat':
         if mol_data.aat is None:
             raise ValueError("AAT tensor data not available in molecule")
@@ -191,25 +253,31 @@ def draw_molecular_tensors(mol_data,
         aat_data = mol_data.aat
         if aat_data.ndim == 2:
             # Reshape from (natoms*3, 3) to (natoms, 3, 3)
-            natoms = len(positions)
-            tensors = aat_data.reshape(natoms, 3, 3)
+            full_tensors = aat_data.reshape(natoms, 3, 3)
         else:
-            tensors = aat_data
+            full_tensors = aat_data
     else:
         raise ValueError("tensor_type must be 'apt' or 'aat'")
+    
+    # Filter tensors based on atom mask
+    filtered_tensors = full_tensors[atom_mask]
+    
+    # Get masses for weight_mag color scheme
     if color_scheme == 'weight_mag':
-        masses = mol_data.atmas
+        full_masses = mol_data.atmas
+        filtered_masses = full_masses[atom_mask]
     else:
-        masses = None
+        filtered_masses = None
     
     return draw_tensor_spheres(
-        positions=positions,
-        tensors=tensors,
+        positions=filtered_positions,
+        tensors=filtered_tensors,
         sphere_radius=sphere_radius,
         nb_sphere_samples=nb_sphere_samples,
         vector_scale=vector_scale,
         opacity=opacity,
-        weights=masses,
+        show_spheres=show_spheres,
+        weights=filtered_masses,
         color_scheme=color_scheme
     )
 

@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 
 # Local imports - tcdlibx package
 from tcdlibx.calc.cube_manip import VecCubeData, VtcdData, cube_parser
-from tcdlibx.graph.helpers import EleMolecule, VibMolecule, filtervecatom
+from tcdlibx.graph.helpers import EleMolecule, VibMolecule, filtervecatom, DEFAULT_VIS_VALS
 import tcdlibx.graph.cube_graphvtk as cubetk
 from tcdlibx.gui.dialogs import (
     SavePngDialog, SavePngSeriesDialog, StreamLineSetupDialog, TCDDialog, QuiverSetupDialog, TensorSetupDialog
@@ -85,26 +85,7 @@ class TCDvis(QMainWindow):
         self._animation_speed = 0.02
         self._show_particles = False
         
-        self._default = {'isoval': {'iso': 0.01},
-                         'vfield': {'vfmax': 1e2,
-                                    'vfmin': 1e5,
-                                    'mspeed': None,
-                                    'npoints': 100,
-                                    'scalellipse': 3.,
-                                    'showdir': False,
-                                    'showell': False,
-                                    'conescale': .1,
-                                    'showbar': False,
-                                    'animate_particles': False,
-                                    'num_particles': 15,
-                                    'particle_type': 'sphere'},
-                         'quiver': {'scale': 100,
-                                   'subsample': 5},
-                         'tensor': {'sphere_radius': 0.5,
-                                    'nb_sphere_samples': 50,
-                                    'vector_scale': 1.0,
-                                    'opacity': 0.8,
-                                    'color_scheme': 'weight_mag'}}
+        self._default = copy.deepcopy(DEFAULT_VIS_VALS) 
 
         self.initUI()
 
@@ -945,7 +926,9 @@ class TCDvis(QMainWindow):
             nb_sphere_samples=self._default['tensor']['nb_sphere_samples'],
             vector_scale=self._default['tensor']['vector_scale'],
             opacity=self._default['tensor']['opacity'],
-            color_scheme=self._default['tensor']['color_scheme']
+            color_scheme=self._default['tensor']['color_scheme'],
+            atom_filter=self._default['tensor']['atom_filter'],
+            show_spheres=self._default['tensor']['show_spheres']
         )
         self.ren.AddActor(self._actors['tensor'].actor)
         self._updatereder()
@@ -963,18 +946,30 @@ class TCDvis(QMainWindow):
             self._showtensors(ttype='aat')
 
     def tensor_settings(self):
-        tensprm = TensorSetupDialog(sphere_radius=self._default['tensor']['sphere_radius'],
-                                    nb_sphere_samples=self._default['tensor']['nb_sphere_samples'],
-                                    vector_scale=self._default['tensor']['vector_scale'],
-                                    opacity=self._default['tensor']['opacity'],
-                                    color_scheme=self._default['tensor']['color_scheme'],)
+        # Convert atom_filter list to comma-separated string for the dialog
+        atom_filter_str = None
+        if self._default['tensor']['atom_filter'] is not None:
+            atom_filter_str = ','.join(self._default['tensor']['atom_filter'])
+            
+        tensprm = TensorSetupDialog(
+            sphere_radius=self._default['tensor']['sphere_radius'],
+            nb_sphere_samples=self._default['tensor']['nb_sphere_samples'],
+            vector_scale=self._default['tensor']['vector_scale'],
+            opacity=self._default['tensor']['opacity'],
+            color_scheme=self._default['tensor']['color_scheme'],
+            atom_filter=atom_filter_str,
+            show_spheres=self._default['tensor']['show_spheres']
+        )
         tensprm.exec()
         # Update the default values
-        self._default['tensor']['sphere_radius'] = tensprm._sphere_radius
-        self._default['tensor']['nb_sphere_samples'] = tensprm._nb_sphere_samples
-        self._default['tensor']['vector_scale'] = tensprm._vector_scale
-        self._default['tensor']['opacity'] = tensprm._opacity
-        self._default['tensor']['color_scheme'] = tensprm._color_scheme
+        self._default['tensor']['sphere_radius'] = tensprm.sphere_radius
+        self._default['tensor']['nb_sphere_samples'] = tensprm.nb_sphere_samples
+        self._default['tensor']['vector_scale'] = tensprm.vector_scale
+        self._default['tensor']['opacity'] = tensprm.opacity
+        self._default['tensor']['color_scheme'] = tensprm.color_scheme
+        self._default['tensor']['atom_filter'] = tensprm.atom_filter
+        self._default['tensor']['show_spheres'] = tensprm.show_spheres
+        
         if 'tensor' in self._actors:
             self.ren.RemoveActor(self._actors['tensor'].actor)
             self._actors.pop('tensor')

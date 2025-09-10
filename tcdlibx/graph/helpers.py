@@ -443,3 +443,26 @@ def fibonacci_spiral_samples_on_unit_sphere(nb_samples, mode=0):
         ss[j, :] = np.array([cos_phi * sin_theta, sin_phi * sin_theta, cos_theta])
         j += 1
     return ss
+
+DEFAULT_VIS_VALS = {'isoval': {'iso': 0.01},
+                         'vfield': {'vfmax': 1e2,
+                                    'vfmin': 1e5,
+                                    'mspeed': None,
+                                    'npoints': 100,
+                                    'scalellipse': 3.,
+                                    'showdir': False,
+                                    'showell': False,
+                                    'conescale': .1,
+                                    'showbar': False,
+                                    'animate_particles': False,
+                                    'num_particles': 15,
+                                    'particle_type': 'sphere'},
+                         'quiver': {'scale': 100,
+                                   'subsample': 5},
+                         'tensor': {'sphere_radius': 0.5,
+                                    'nb_sphere_samples': 50,
+                                    'vector_scale': 1.0,
+                                    'opacity': 0.8,
+                                    'color_scheme': 'weight_mag',
+                                    'atom_filter': None,
+                                    'show_spheres': False}}

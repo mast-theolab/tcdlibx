@@ -406,6 +406,8 @@ class TensorSetupDialog(QDialog):
                  vector_scale: float = 2.0,
                  opacity: float = 0.8,
                  color_scheme: str = 'weight_mag',
+                 atom_filter: tp.Optional[str] = None,
+                 show_spheres: bool = False,
                  parent: tp.Optional[tp.Union[QDialog, None]] = None) -> None:
         """Initialize the tensor setup dialog.
 
@@ -415,6 +417,8 @@ class TensorSetupDialog(QDialog):
             vector_scale: Scale factor for the vectors
             opacity: Opacity of the visualization
             color_scheme: Color scheme for vectors ('magnitude', 'weight_mag', 'uniform')
+            atom_filter: Comma-separated atomic symbols to filter (e.g., "C,N,O")
+            show_spheres: Whether to show pale yellow spheres at tensor positions
             parent: Parent dialog (optional)
         """
         super().__init__(parent)
@@ -425,6 +429,8 @@ class TensorSetupDialog(QDialog):
         self._vector_scale = vector_scale
         self._opacity = opacity
         self._color_scheme = color_scheme
+        self._atom_filter = atom_filter
+        self._show_spheres = show_spheres
         
         self.setWindowTitle("Tensor Visualization Setup")
         
@@ -473,6 +479,25 @@ class TensorSetupDialog(QDialog):
         color_hlay.addWidget(self._color_combo)
         grid.addLayout(color_hlay, 4, 0)
         
+        # Atom filter
+        filter_label = QLabel("Atom filter (comma-separated):")
+        self._filter_line = QLineEdit()
+        self._filter_line.setPlaceholderText("e.g., C,N,O (leave empty for all atoms)")
+        if atom_filter:
+            self._filter_line.setText(atom_filter)
+        self._filter_line.textChanged.connect(self._setatomfilter)
+        
+        filter_hlay = QHBoxLayout()
+        filter_hlay.addWidget(filter_label)
+        filter_hlay.addWidget(self._filter_line)
+        grid.addLayout(filter_hlay, 5, 0)
+        
+        # Show spheres checkbox
+        self._show_spheres_checkbox = QCheckBox("Show pale yellow spheres at tensor positions")
+        self._show_spheres_checkbox.setChecked(show_spheres)
+        self._show_spheres_checkbox.stateChanged.connect(self._setshowspheres)
+        grid.addWidget(self._show_spheres_checkbox, 6, 0)
+        
         # Dialog buttons
         QBtn = QDialogButtonBox.Ok | QDialogButtonBox.Cancel
         self.buttonBox = QDialogButtonBox(QBtn)
@@ -494,6 +519,16 @@ class TensorSetupDialog(QDialog):
     def _setcolorscheme(self):
         """Set the color scheme from the combo box."""
         self._color_scheme = self._color_combo.currentText()
+    
+    def _setatomfilter(self):
+        """Set the atom filter from the text input."""
+        self._atom_filter = self._filter_line.text().strip()
+        if not self._atom_filter:
+            self._atom_filter = None
+    
+    def _setshowspheres(self):
+        """Set the show spheres flag from the checkbox."""
+        self._show_spheres = self._show_spheres_checkbox.isChecked()
     
     @property
     def sphere_radius(self) -> float:
@@ -519,6 +554,22 @@ class TensorSetupDialog(QDialog):
     def color_scheme(self) -> str:
         """Get the color scheme."""
         return self._color_scheme
+    
+    @property
+    def atom_filter(self) -> tp.Optional[tp.List[str]]:
+        """Get the atom filter as a list of atomic symbols."""
+        if self._atom_filter is None or self._atom_filter == "":
+            return None
+        # Split by comma and strip whitespace from each symbol
+        symbols = [symbol.strip() for symbol in self._atom_filter.split(',')]
+        # Filter out empty strings
+        symbols = [symbol for symbol in symbols if symbol]
+        return symbols if symbols else None
+    
+    @property
+    def show_spheres(self) -> bool:
+        """Get the show spheres flag."""
+        return self._show_spheres
 
 
 class StreamLineSetupDialog(QDialog):
