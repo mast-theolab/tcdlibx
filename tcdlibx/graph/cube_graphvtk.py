@@ -282,6 +282,301 @@ def draw_molecular_tensors(mol_data,
     )
 
 
+def draw_tensor_surface_from_norms(positions: np.ndarray,
+                                  tensors: np.ndarray,
+                                  sphere_radius: float = 0.5,
+                                  nb_sphere_samples: int = 500,
+                                  surface_scale: float = 1.0,
+                                  opacity: float = 0.7,
+                                  weights: tp.Optional[np.ndarray] = None,
+                                  color_scheme: str = 'magnitude') -> MyvtkActor:
+    """
+    Generate independent surfaces on each atom using the norm of vectors computed with tensor operations.
+    Each atom gets its own separate surface mesh.
+    The process follows these steps:
+    1. Compute vectors from tensor x position on sphere points (T·r)
+    2. Calculate the magnitude/norm of these vectors
+    3. Create new vectors using displacement directions with magnitudes as the norm
+    4. Convert to point cloud and create surface using vtkDelaunay3D and vtkDataSetSurfaceFilter
+    5. Create separate surface for each atom and combine them using vtkAppendPolyData
+    
+    Args:
+        positions (np.ndarray): Array of shape (N, 3) with tensor positions  
+        tensors (np.ndarray): Array of shape (N, 3, 3) with 3x3 tensors
+        sphere_radius (float): Base radius for the sampling spheres
+        nb_sphere_samples (int): Number of fibonacci samples on each sphere
+        surface_scale (float): Scale factor for the surface based on magnitudes
+        opacity (float): Opacity of the surface
+        weights (np.ndarray): Optional weights for the tensor magnitudes
+        color_scheme (str): Color scheme for the surface ('magnitude', 'uniform', 'signed')
+        
+    Returns:
+        MyvtkActor: VTK actor containing the independent tensor-based surfaces
+    """
+    if positions.shape[0] != tensors.shape[0]:
+        raise ValueError("Number of positions must match number of tensors")
+    
+    if tensors.shape[1:] != (3, 3):
+        raise ValueError("Tensors must be 3x3 matrices")
+    
+    # Generate fibonacci samples on unit sphere
+    unit_sphere_points = fibonacci_spiral_samples_on_unit_sphere(nb_sphere_samples)
+    
+    # Create independent surfaces for each atom
+    individual_surfaces = []
+    all_scalars_global = []
+    
+    for atom_idx, (pos, tensor) in enumerate(zip(positions, tensors)):
+        # Step 1: Compute vectors from tensor × position on sphere points
+        tensor_vectors = np.zeros_like(unit_sphere_points)
+        magnitudes = np.zeros(nb_sphere_samples)
+        cosine_values = np.zeros(nb_sphere_samples)  # For signed color scheme
+        
+        for i, unit_vec in enumerate(unit_sphere_points):
+            # Apply tensor to unit vector: T·r
+            tensor_result = np.dot(tensor, unit_vec)
+            tensor_vectors[i] = tensor_result
+            
+            # Step 2: Calculate magnitude/norm of the vectors
+            magnitude = np.linalg.norm(tensor_result)
+            magnitudes[i] = magnitude
+            
+            # Calculate cosine of angle between unit_vec and tensor_result for signed color scheme
+            if magnitude > 1e-12:  # Avoid division by zero
+                # Normalize tensor_result to get unit vector
+                tensor_result_normalized = tensor_result / magnitude
+                # Calculate cosine of angle (dot product of unit vectors)
+                cosine_values[i] = np.dot(unit_vec, tensor_result_normalized)
+            else:
+                cosine_values[i] = 0.0
+            
+            # Apply weights if provided
+            if weights is not None:
+                magnitudes[i] /= np.sqrt(weights[atom_idx])
+        
+        # Step 3: Create new vectors using displacement directions with computed magnitudes
+        # Direction = unit vector on sphere, Magnitude = norm from tensor operation
+        surface_points = np.zeros_like(unit_sphere_points)
+        
+        for i, unit_vec in enumerate(unit_sphere_points):
+            # New vector = direction * (base_radius + scale * magnitude)
+            radius_at_point = sphere_radius + surface_scale * magnitudes[i]
+            surface_points[i] = pos + unit_vec * radius_at_point
+        
+        # Step 4: Create individual surface for this atom
+        # Convert to point cloud
+        points = vtk.vtkPoints()
+        points.SetNumberOfPoints(len(surface_points))
+        
+        scalars = vtk.vtkDoubleArray()
+        scalars.SetNumberOfComponents(1)
+        scalars.SetNumberOfTuples(len(surface_points))
+        scalars.SetName('tensor_magnitude')
+        
+        # Choose scalar values based on color scheme
+        if color_scheme == 'signed':
+            scalar_values = cosine_values
+        else:
+            scalar_values = magnitudes
+        
+        for i, (point, scalar) in enumerate(zip(surface_points, scalar_values)):
+            points.SetPoint(i, point)
+            scalars.SetValue(i, scalar)
+        
+        # Create polydata for this atom's point cloud
+        polydata = vtk.vtkPolyData()
+        polydata.SetPoints(points)
+        polydata.GetPointData().SetScalars(scalars)
+        
+        # Create Delaunay 3D triangulation for this atom only
+        delaunay = vtk.vtkDelaunay3D()
+        delaunay.SetInputData(polydata)
+        delaunay.Update()
+        
+        # Extract the surface from this atom's 3D mesh
+        surface_filter = vtk.vtkDataSetSurfaceFilter()
+        surface_filter.SetInputConnection(delaunay.GetOutputPort())
+        surface_filter.Update()
+        
+        # Store this atom's surface
+        individual_surfaces.append(surface_filter.GetOutput())
+        
+        # Add appropriate scalars to global collection
+        if color_scheme == 'signed':
+            all_scalars_global.extend(cosine_values)
+        else:
+            all_scalars_global.extend(magnitudes)
+    
+    # Step 5: Combine all individual surfaces using vtkAppendPolyData
+    append_filter = vtk.vtkAppendPolyData()
+    for surface in individual_surfaces:
+        append_filter.AddInputData(surface)
+    append_filter.Update()
+    
+    # Create mapper for the combined surfaces
+    mapper = vtk.vtkPolyDataMapper()
+    mapper.SetInputConnection(append_filter.GetOutputPort())
+    
+    # Set up color mapping using global scalar range
+    if color_scheme == 'magnitude':
+        # Create a color lookup table
+        lut = vtk.vtkColorTransferFunction()
+        
+        # Get the global scalar range for proper color mapping across all atoms
+        scalar_min = np.min(all_scalars_global)
+        scalar_max = np.max(all_scalars_global)
+        scalar_range = scalar_max - scalar_min
+        
+        if scalar_range > 0:
+            # Map colors based on actual scalar range
+            lut.AddRGBPoint(scalar_min, 0, 0, 1)                      # Blue for minimum
+            lut.AddRGBPoint(scalar_min + 0.5 * scalar_range, 0, 1, 0) # Green for medium
+            lut.AddRGBPoint(scalar_max, 1, 0, 0)                      # Red for maximum
+        else:
+            # Fallback if all scalars are the same
+            lut.AddRGBPoint(scalar_min, 0, 1, 0)  # Green for uniform values
+        
+        mapper.SetLookupTable(lut)
+        mapper.SetScalarRange(scalar_min, scalar_max)
+    elif color_scheme == 'signed':
+        # Create a color lookup table for signed values (-1 to 1)
+        lut = vtk.vtkColorTransferFunction()
+        
+        # Red for -1 (cosine = -1, opposite direction)
+        lut.AddRGBPoint(-1.0, 1, 0, 0)  # Red
+        # White for 0 (cosine = 0, perpendicular)
+        lut.AddRGBPoint(0.0, 1, 1, 1)   # White
+        # Blue for 1 (cosine = 1, same direction)
+        lut.AddRGBPoint(1.0, 0, 0, 1)   # Blue
+        
+        mapper.SetLookupTable(lut)
+        mapper.SetScalarRange(-1.0, 1.0)
+    else:  # uniform
+        mapper.ScalarVisibilityOff()
+    
+    # Create actor
+    actor = vtk.vtkActor()
+    actor.SetMapper(mapper)
+    actor.GetProperty().SetOpacity(opacity)
+    
+    # Set uniform color if not using magnitude/signed coloring
+    if color_scheme == 'uniform':
+        actor.GetProperty().SetColor(0.8, 0.6, 0.2)  # Golden color
+    else:
+        # For magnitude/signed coloring, ensure property doesn't interfere with scalar coloring
+        # Set InterpolateScalarsBeforeMapping to ensure smooth color transitions
+        mapper.SetInterpolateScalarsBeforeMapping(True)
+    
+    return MyvtkActor(actor, append_filter)
+
+
+def draw_molecular_tensor_surface(mol_data,
+                                tensor_type: str = 'apt',
+                                sphere_radius: float = 0.5,
+                                nb_sphere_samples: int = 50,
+                                surface_scale: float = 1.0,
+                                opacity: float = 0.7,
+                                color_scheme: str = 'magnitude',
+                                atom_filter: tp.Optional[tp.List[str]] = None) -> MyvtkActor:
+    """
+    Create tensor-based surfaces from molecular data using norm-based surface generation.
+    
+    Args:
+        mol_data: VibMolecule (or object with compatible interface)
+        tensor_type (str): Type of tensor to visualize ('apt' or 'aat')
+        sphere_radius (float): Base radius for the sampling spheres
+        nb_sphere_samples (int): Number of fibonacci samples on each sphere
+        surface_scale (float): Scale factor for surface modulation based on magnitudes
+        opacity (float): Opacity of the surface
+        color_scheme (str): Color scheme for the surface ('magnitude', 'uniform', 'signed')
+        atom_filter (list): List of atomic symbols to filter (e.g., ['C', 'N', 'O'])
+        
+    Returns:
+        MyvtkActor: VTK actor containing the tensor-based surface
+    """
+    # Import ELEMENTS for atomic symbol lookup
+    from tcdlibx.utils.mol_data import ELEMENTS
+    
+    # Check if object has required attributes
+    if not hasattr(mol_data, 'crd') or not hasattr(mol_data, '_moldata'):
+        raise ValueError("mol_data must have 'crd' and '_moldata' attributes")
+    
+    # Get atomic positions and numbers
+    positions = mol_data.crd
+    atomic_numbers = mol_data.atnum
+    natoms = positions.shape[0]
+    
+    # Create atom filter mask if atom_filter is provided
+    if atom_filter is not None:
+        # Convert atomic symbols to atomic numbers
+        filter_atomic_numbers = []
+        for symbol in atom_filter:
+            try:
+                # Find the atomic number for this symbol
+                atomic_number = ELEMENTS.index(symbol)
+                filter_atomic_numbers.append(atomic_number)
+            except ValueError:
+                raise ValueError(f"Unknown atomic symbol: {symbol}")
+        
+        # Create mask for atoms that match the filter
+        atom_mask = np.isin(atomic_numbers, filter_atomic_numbers)
+        
+        if not atom_mask.any():
+            raise ValueError(f"No atoms found matching the filter: {atom_filter}")
+        
+        # Filter positions
+        filtered_positions = positions[atom_mask]
+    else:
+        # No filter, use all atoms
+        atom_mask = np.ones(natoms, dtype=bool)
+        filtered_positions = positions
+    
+    # Get tensor data
+    if tensor_type.lower() == 'apt':
+        if mol_data.apt is None:
+            raise ValueError("APT tensor data not available in molecule")
+        # APT tensors are stored as (natoms*3, 3) - reshape to (natoms, 3, 3)
+        apt_data = mol_data.apt
+        if apt_data.ndim == 2:
+            # Reshape from (natoms*3, 3) to (natoms, 3, 3)
+            full_tensors = apt_data.reshape(natoms, 3, 3)
+        else:
+            full_tensors = apt_data
+    elif tensor_type.lower() == 'aat':
+        if mol_data.aat is None:
+            raise ValueError("AAT tensor data not available in molecule")
+        # AAT tensors are stored as (natoms*3, 3) - reshape to (natoms, 3, 3)
+        aat_data = mol_data.aat
+        if aat_data.ndim == 2:
+            # Reshape from (natoms*3, 3) to (natoms, 3, 3)
+            full_tensors = aat_data.reshape(natoms, 3, 3)
+        else:
+            full_tensors = aat_data
+    else:
+        raise ValueError("tensor_type must be 'apt' or 'aat'")
+    
+    # Filter tensors based on atom mask
+    filtered_tensors = full_tensors[atom_mask]
+    
+    # Get masses for weighting if available
+    if hasattr(mol_data, 'atmas'):
+        full_masses = mol_data.atmas
+        filtered_masses = full_masses[atom_mask]
+    else:
+        filtered_masses = None
+    
+    return draw_tensor_surface_from_norms(
+        positions=filtered_positions,
+        tensors=filtered_tensors,
+        sphere_radius=sphere_radius,
+        nb_sphere_samples=nb_sphere_samples,
+        surface_scale=surface_scale,
+        opacity=opacity,
+        weights=filtered_masses,
+        color_scheme=color_scheme
+    )
+
+
 def dots2vtkarray(dots: np.ndarray) -> vtk.vtkPolyData:
     points1 = vtk.vtkPoints()
     for coords in dots:

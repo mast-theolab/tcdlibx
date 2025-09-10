@@ -172,6 +172,20 @@ class TCDvis(QMainWindow):
         aatButton.triggered.connect(self.showaat)
         tenmenu.addAction(aatButton)
         self._menus['mol']['ten']['aat'] = aatButton
+        # New stuff
+        aptsurButton = QAction(QIcon(''), 'APT Surface', self)
+        aptsurButton.setStatusTip('Display the APT surface from unit displacement on sphere')
+        aptsurButton.setCheckable(True)
+        aptsurButton.triggered.connect(self.showaptsurf)
+        tenmenu.addAction(aptsurButton)
+        self._menus['mol']['ten']['aptsurf'] = aptsurButton
+        aatsurButton = QAction(QIcon(''), 'AAT Surface', self)
+        aatsurButton.setStatusTip('Display the AAT surface from unit displacement on sphere')
+        aatsurButton.setCheckable(True)
+        aatsurButton.triggered.connect(self.showaatsurf)
+        tenmenu.addAction(aatsurButton)
+        self._menus['mol']['ten']['aatsurf'] = aatsurButton
+        # Settings and clear
         settButton = QAction(QIcon(''), 'Settings', self)
         settButton.setStatusTip('Open tensor settings')
         settButton.triggered.connect(self.tensor_settings)
@@ -945,6 +959,35 @@ class TCDvis(QMainWindow):
         else:
             self._showtensors(ttype='aat')
 
+    def _showtenssurf(self, ttype="apt"):
+        # Use the correct surface key (aptsurf/aatsurf) instead of just ttype (apt/aat)
+        surface_key = ttype + 'surf'
+        self.cleartens(key=surface_key)
+        self._actors['tensor'] = cubetk.draw_molecular_tensor_surface(
+            self._fchk,
+            tensor_type=ttype,
+            sphere_radius=self._default['tensor']['sphere_radius'],
+            nb_sphere_samples=self._default['tensor']['nb_sphere_surface'],
+            surface_scale=self._default['tensor']['surface_scale'],
+            opacity=self._default['tensor']['opacity'],
+            color_scheme=self._default['tensor']['surf_color_scheme'],
+            atom_filter=self._default['tensor']['atom_filter'],
+        )
+        self.ren.AddActor(self._actors['tensor'].actor)
+        self._updatereder()
+
+    def showaptsurf(self):
+        if not self._menus['mol']['ten']['aptsurf'].isChecked():
+            self.cleartens(key='aptsurf')
+        else:
+            self._showtenssurf(ttype='apt')
+    
+    def showaatsurf(self):
+        if not self._menus['mol']['ten']['aatsurf'].isChecked():
+            self.cleartens(key='aatsurf')
+        else:
+            self._showtenssurf(ttype='aat')
+
     def tensor_settings(self):
         # Convert atom_filter list to comma-separated string for the dialog
         atom_filter_str = None
@@ -954,9 +997,12 @@ class TCDvis(QMainWindow):
         tensprm = TensorSetupDialog(
             sphere_radius=self._default['tensor']['sphere_radius'],
             nb_sphere_samples=self._default['tensor']['nb_sphere_samples'],
+            nb_sphere_surface=self._default['tensor']['nb_sphere_surface'],
             vector_scale=self._default['tensor']['vector_scale'],
+            surface_scale=self._default['tensor']['surface_scale'],
             opacity=self._default['tensor']['opacity'],
             color_scheme=self._default['tensor']['color_scheme'],
+            surf_color_scheme=self._default['tensor']['surf_color_scheme'],
             atom_filter=atom_filter_str,
             show_spheres=self._default['tensor']['show_spheres']
         )
@@ -964,19 +1010,28 @@ class TCDvis(QMainWindow):
         # Update the default values
         self._default['tensor']['sphere_radius'] = tensprm.sphere_radius
         self._default['tensor']['nb_sphere_samples'] = tensprm.nb_sphere_samples
+        self._default['tensor']['nb_sphere_surface'] = tensprm.nb_sphere_surface
         self._default['tensor']['vector_scale'] = tensprm.vector_scale
+        self._default['tensor']['surface_scale'] = tensprm.surface_scale
         self._default['tensor']['opacity'] = tensprm.opacity
         self._default['tensor']['color_scheme'] = tensprm.color_scheme
+        self._default['tensor']['surf_color_scheme'] = tensprm.surf_color_scheme
         self._default['tensor']['atom_filter'] = tensprm.atom_filter
         self._default['tensor']['show_spheres'] = tensprm.show_spheres
         
         if 'tensor' in self._actors:
             self.ren.RemoveActor(self._actors['tensor'].actor)
             self._actors.pop('tensor')
+            # Check and update tensor vectors (apt/aat)
             if self._menus['mol']['ten']['apt'].isChecked():
                 self._showtensors(ttype='apt')
             elif self._menus['mol']['ten']['aat'].isChecked():
                 self._showtensors(ttype='aat')
+            # Check and update tensor surfaces (aptsurf/aatsurf)
+            elif self._menus['mol']['ten']['aptsurf'].isChecked():
+                self._showtenssurf(ttype='apt')
+            elif self._menus['mol']['ten']['aatsurf'].isChecked():
+                self._showtenssurf(ttype='aat')
 
 
     def cleartens(self, key=None):
