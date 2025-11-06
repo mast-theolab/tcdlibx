@@ -272,6 +272,32 @@ class VibMolecule(Molecule):
             if self._frags is not None:
                 self._vtcd[tcd].set_fragments(self._frags['indx'])
 
+    def remove_tcd(self, vib: int) -> bool:
+        """
+        Remove a specific TCD cube from memory to free resources.
+        
+        Args:
+            vib (int): Vibration index to remove
+            
+        Returns:
+            bool: True if cube was removed, False if not found
+        """
+        if vib in self._vtcd:
+            del self._vtcd[vib]
+            return True
+        return False
+
+    def remove_all_tcd(self) -> int:
+        """
+        Remove all stored TCD cubes from memory to free resources.
+        
+        Returns:
+            int: Number of cubes removed
+        """
+        count = len(self._vtcd)
+        self._vtcd.clear()
+        return count
+
 
 class EleMolecule(Molecule):
     """ Class to store data related to electronic transitions """
@@ -392,7 +418,34 @@ class EleMolecule(Molecule):
         for tcd in self.avail_tcd():
             self._etcd[tcd] = AimCubeData(self._etcd[tcd], self._aimdata)
             if self._frags is not None:
-                self._etcd[tcd].set_fragments(self._frags['indx'])       
+                self._etcd[tcd].set_fragments(self._frags['indx'])
+
+    def remove_tcd(self, state: int) -> bool:
+        """
+        Remove a specific TCD cube from memory to free resources.
+        
+        Args:
+            state (int): Electronic state index to remove
+            
+        Returns:
+            bool: True if cube was removed, False if not found
+        """
+        if state in self._etcd:
+            del self._etcd[state]
+            return True
+        return False
+
+    def remove_all_tcd(self) -> int:
+        """
+        Remove all stored TCD cubes from memory to free resources.
+        
+        Returns:
+            int: Number of cubes removed
+        """
+        count = len(self._etcd)
+        self._etcd.clear()
+        return count
+    
 
 class MyvtkActor():
     """Helper class to store vtk actor and filter and allow an easy access to them
