@@ -1,7 +1,7 @@
 # Script to check the dipole moments cube wrt the fchk file
 
 import sys
-#import numpy as np
+import numpy as np
 import os
 import argparse
 import re
@@ -64,11 +64,11 @@ def main():
     with open(fout, 'w') as f:
         f.write("DTM Analysis Results\n")
         f.write("=" * 131 + "\n")
-        f.write("N. {:^8s}").format("Freq.")
+        f.write("N. {:^8s}".format("Freq."))
         f.write("{:^30s}".format("MFP (electric)"))
         f.write("{:^30s}".format("MFP (magnetic)"))
         f.write("{:^30s}".format("TCD_tot (electric)"))
-        f.write("{:^30s}".format("TCD_tot (magnetic)")+"\n")
+        f.write("{:^30s}".format("TCD_tot (magnetic)") + "\n")
         f.write("-" * 131 + "\n")
     
     for i in range(1, fchk.ntrans + 1):
@@ -83,15 +83,26 @@ def main():
         fchk.add_tcd(i-1, tcddata)
         nuc_cntr = fchk.get_dtm(i-1, tps='nuc', cgs=False)
         mfp_dtm = fchk.get_dtm(i-1, tps='tot', cgs=False)
-        tcd_dtm = fchk.get_tcd_dtm(i-1, cgs=False)
-        # to length for vib
-        tcd_dtm[0] = tcd_dtm[0] / (fchk._moldata['freq'][i-1] /phys_fact("au2cm1"))
+        print(f"State {i}: Freq = {fchk._moldata['freq'][i-1]:.2f} cm^-1")
+        print("MFP DTM (ele): {:10.5f} {:10.5f} {:8.4f}".format(mfp_dtm[0][0]-nuc_cntr[0][0], mfp_dtm[0][1]-nuc_cntr[0][1], mfp_dtm[0][2]-nuc_cntr[0][2]))
+        print("MFP DTM (mag): {:10.5f} {:10.5f} {:8.4f}".format(mfp_dtm[1][0]-nuc_cntr[1][0], mfp_dtm[1][1]-nuc_cntr[1][1], mfp_dtm[1][2]-nuc_cntr[1][2]))
+        tcd_dtm = np.array(fchk.get_tcd_dtm(i-1, cgs=False))
+        tcd_dtm /= np.sqrt(fchk._moldata['rmas'][i-1])
+        # freq_au = fchk._moldata['freq'][i-1] / phys_fact("au2cm1")
+        # tcd_dtm[0] = tcd_dtm[0] / freq_au
+        tcd_dtm[0] = tcd_dtm[0]
+        print("TCD DTM (ele): {:10.5f} {:10.5f} {:8.4f}".format(tcd_dtm[0][0], tcd_dtm[0][1], tcd_dtm[0][2]))
+        print("TCD DTM (mag): {:10.5f} {:10.5f} {:8.4f}".format(tcd_dtm[1][0], tcd_dtm[1][1], tcd_dtm[1][2]))
         tcd_tot = (nuc_cntr[0]+tcd_dtm[0], nuc_cntr[1]+tcd_dtm[1])
+        print("MFP DS:{:10.5f}".format(np.dot(mfp_dtm[0],mfp_dtm[0])))
+        print("TCD DS:{:10.5f}".format(np.dot(tcd_tot[0],tcd_tot[0])))
+        print("MFP RS:{:10.5f}".format(np.dot(mfp_dtm[0],mfp_dtm[1])))
+        print("TCD RS:{:10.5f}".format(np.dot(tcd_tot[0],tcd_tot[1])))
         
         # Print results for each state to output file
         with open(fout, 'a') as f:
-            f.write(f"{i:3d}: ")
-            f.write(f"{fchk._moldata['freq'][i-1]:8.2f} cm-1, ")
+            f.write(f"{i:3d}")
+            f.write(f"{fchk._moldata['freq'][i-1]:8.2f}")
             f.write(f"{mfp_dtm[0][0]:10.5f} {mfp_dtm[0][1]:10.5f} {mfp_dtm[0][2]:8.4f}")
             f.write(f"{mfp_dtm[1][0]:10.5f} {mfp_dtm[1][1]:10.5f} {mfp_dtm[1][2]:8.4f}")
             f.write(f"{tcd_tot[0][0]:10.5f} {tcd_tot[0][1]:10.5f} {tcd_tot[0][2]:8.4f}")

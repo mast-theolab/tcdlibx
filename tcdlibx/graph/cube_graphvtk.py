@@ -614,6 +614,53 @@ def _countur(grid, isoval, active='scalar', colors=None, opacity=0.3):
 
     return MyvtkActor(isosurf_actor, contourFilter)
 
+def volumerendering(cubedata, active='scalar',
+                    lower=0.0, upper=1.0,
+                    opacity=1.0):
+    grid = fillcubeimage(cubedata)
+    return _volumerendering(grid, active, lower, upper, opacity)
+
+def _volumerendering(grid: vtk.vtkImageData,
+                     active: str = 'scalar',
+                     lower: float = 0.0,
+                     upper: float = 1.0,
+                     opacity: float = 1.0) -> MyvtkActor:
+    """
+    Return a vtk actor with volume rendering
+    from a vtkImageData object.
+    Args:
+        grid (vtk.vtkImageData): Input image data for volume rendering.
+        lower (float): Lower bound for scalar range.
+        upper (float): Upper bound for scalar range.
+        opacity (float): Opacity for the volume rendering.  
+    Returns:
+        MyvtkActor: Actor containing the volume rendering.
+    """
+    grid.GetPointData().SetActiveScalars(active)
+    # Create transfer mapping scalar value to opacity
+    opacityTransferFunction = vtk.vtkPiecewiseFunction()
+    opacityTransferFunction.AddPoint(lower, 0.0)
+    opacityTransferFunction.AddPoint(upper, opacity)
+    # Create transfer mapping scalar value to color
+    colorTransferFunction = vtk.vtkColorTransferFunction()
+    colorTransferFunction.AddRGBPoint(lower, 1.0, 0.0, 0.0)  # Red for low values
+    colorTransferFunction.AddRGBPoint(upper, 0.0, 0.0, 1.0)  # Blue for high values
+    # The property describes how the data will look
+    volumeProperty = vtk.vtkVolumeProperty()
+    volumeProperty.SetColor(colorTransferFunction)
+    volumeProperty.SetScalarOpacity(opacityTransferFunction)
+    volumeProperty.ShadeOn()
+    volumeProperty.SetInterpolationTypeToLinear()
+    # The mapper / ray cast function know how to render the data
+    volumeMapper = vtk.vtkSmartVolumeMapper()
+    volumeMapper.SetInputData(grid)
+    # The volume holds the mapper and the property and
+    # can be used to position/orient the volume
+    volume = vtk.vtkVolume()
+    volume.SetMapper(volumeMapper)
+    volume.SetProperty(volumeProperty)
+    return MyvtkActor(volume, volumeMapper)
+
 
 def draw_colorbar(targetactor: vtk.vtkActor, title: str,
                   nlabs: int = 5) -> MyvtkActor:
