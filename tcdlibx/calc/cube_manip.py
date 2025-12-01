@@ -482,6 +482,300 @@ class CubeData:
         integrated = vec_1.sum()*poligon
         return integrated
 
+    def interpolate_on_plane(self, plane_origin, plane_normal, 
+                           plane_u_vector=None, plane_v_vector=None,
+                           grid_size=None, scalar_index=0):
+        """
+        Interpolate cube values on a plane using trilinear interpolation.
+        
+        Creates a grid on the specified plane with the same spacing as the original cube
+        and interpolates values using trilinerarinterpolation. Points outside the 
+        original grid are set to np.nan.
+        
+        If the plane coincides with one of the original grid planes, returns exact 
+        grid data without interpolation.
+        
+        Args:
+            plane_origin: 3D point defining the origin of the plane (world coordinates)
+            plane_normal: 3D vector defining the normal to the plane
+            plane_u_vector: Optional 3D vector defining the U direction on the plane.
+                           If None, will be computed automatically.
+            plane_v_vector: Optional 3D vector defining the V direction on the plane.
+                           If None, will be computed automatically.
+            grid_size: Tuple (nu, nv) defining grid dimensions. If None, will be
+                      computed based on the intersection with the cube bounds.
+            scalar_index: Index of scalar field to interpolate (for multi-field cubes)
+            
+        Returns:
+            dict: Contains 'values' (2D array), 'u_coords', 'v_coords', 'world_points'
+                 where np.nan indicates points outside the original grid
+        """
+        plane_origin = np.array(plane_origin, dtype=float)
+        plane_normal = np.array(plane_normal, dtype=float)
+        
+        # Normalize the plane normal
+        plane_normal = plane_normal / np.linalg.norm(plane_normal)
+        
+        # Check if the plane coincides with one of the original grid planes
+        grid_plane_info = self._check_grid_plane_alignment(plane_origin, plane_normal)
+        if grid_plane_info is not None:
+            return self._extract_grid_plane_data(grid_plane_info, scalar_index)
+        
+        # Create orthogonal vectors on the plane if not provided
+        if plane_u_vector is None:
+            # Find vector least parallel to normal
+            temp_vec = np.array([1, 0, 0])
+            if abs(np.dot(plane_normal, temp_vec)) > 0.9:
+                temp_vec = np.array([0, 1, 0])
+            
+            # Create orthogonal vectors using cross product
+            plane_u_vector = np.cross(plane_normal, temp_vec)
+            plane_u_vector = plane_u_vector / np.linalg.norm(plane_u_vector)
+        else:
+            plane_u_vector = np.array(plane_u_vector, dtype=float)
+            plane_u_vector = plane_u_vector / np.linalg.norm(plane_u_vector)
+            
+        if plane_v_vector is None:
+            plane_v_vector = np.cross(plane_normal, plane_u_vector)
+            plane_v_vector = plane_v_vector / np.linalg.norm(plane_v_vector)
+        else:
+            plane_v_vector = np.array(plane_v_vector, dtype=float)
+            plane_v_vector = plane_v_vector / np.linalg.norm(plane_v_vector)
+        
+        # Determine grid spacing based on the original cube
+        # Use the minimum spacing from all three directions
+        spacing_x = np.linalg.norm(self.get_axstep(0))
+        spacing_y = np.linalg.norm(self.get_axstep(1))
+        spacing_z = np.linalg.norm(self.get_axstep(2))
+        grid_spacing = min(spacing_x, spacing_y, spacing_z)
+        
+        # If grid_size not provided, estimate based on cube bounds
+        if grid_size is None:
+            # Get cube bounding box in world coordinates
+            origin = self.get_origin()
+            corner = origin + (self.npts[0]-1) * self.get_axstep(0) + \
+                            (self.npts[1]-1) * self.get_axstep(1) + \
+                            (self.npts[2]-1) * self.get_axstep(2)
+            
+            # Project corners onto plane to estimate grid size
+            cube_corners = [
+                origin,
+                origin + (self.npts[0]-1) * self.get_axstep(0),
+                origin + (self.npts[1]-1) * self.get_axstep(1), 
+                origin + (self.npts[2]-1) * self.get_axstep(2),
+                corner,
+                origin + (self.npts[0]-1) * self.get_axstep(0) + (self.npts[1]-1) * self.get_axstep(1),
+                origin + (self.npts[0]-1) * self.get_axstep(0) + (self.npts[2]-1) * self.get_axstep(2),
+                origin + (self.npts[1]-1) * self.get_axstep(1) + (self.npts[2]-1) * self.get_axstep(2)
+            ]
+            
+            # Project corners onto plane coordinate system
+            u_coords = []
+            v_coords = []
+            for corner in cube_corners:
+                vec_to_corner = corner - plane_origin
+                u_coord = np.dot(vec_to_corner, plane_u_vector)
+                v_coord = np.dot(vec_to_corner, plane_v_vector)
+                u_coords.append(u_coord)
+                v_coords.append(v_coord)
+            
+            # Create grid covering the projected area with some margin
+            u_min, u_max = min(u_coords), max(u_coords)
+            v_min, v_max = min(v_coords), max(v_coords)
+            
+            margin = 2 * grid_spacing
+            u_min -= margin
+            u_max += margin
+            v_min -= margin
+            v_max += margin
+            
+            nu = int(np.ceil((u_max - u_min) / grid_spacing)) + 1
+            nv = int(np.ceil((v_max - v_min) / grid_spacing)) + 1
+        else:
+            nu, nv = grid_size
+            u_min = -nu * grid_spacing / 2
+            v_min = -nv * grid_spacing / 2
+        
+        # Create the grid
+        u_range = np.linspace(u_min, u_min + (nu-1) * grid_spacing, nu)
+        v_range = np.linspace(v_min, v_min + (nv-1) * grid_spacing, nv)
+        
+        # Initialize result arrays
+        values = np.full((nv, nu), np.nan)
+        world_points = np.zeros((nv, nu, 3))
+        
+        # Interpolate values at each grid point
+        for i, v_coord in enumerate(v_range):
+            for j, u_coord in enumerate(u_range):
+                # Convert plane coordinates to world coordinates
+                world_point = plane_origin + u_coord * plane_u_vector + v_coord * plane_v_vector
+                world_points[i, j] = world_point
+                
+                try:
+                    # Convert to local coordinates
+                    loc_point = self._wrdtolocal(world_point)
+                    
+                    # Check if point is inside the grid bounds
+                    if (loc_point < 0.).any() or (loc_point >= np.array(self.npts)).any():
+                        # Point is outside grid, leave as np.nan
+                        continue
+                    
+                    # Get cube info and interpolate
+                    datavox, normpoint = self._getcubeinfo(loc_point)
+                    
+                    # Handle different cube dimensions
+                    if self.nval == 1:
+                        values[i, j] = trilinerarinterpolation(datavox['vox_v'], normpoint)
+                    else:
+                        # For multi-field cubes, extract values for the specified scalar field
+                        cube_values_field = [voxel_val[scalar_index] if hasattr(voxel_val, '__len__') 
+                                           else voxel_val for voxel_val in datavox['vox_v']]
+                        values[i, j] = trilinerarinterpolation(cube_values_field, normpoint)
+                        
+                except (NoValidData, IndexError, ValueError):
+                    # Point is outside valid interpolation region
+                    continue
+        
+        return {
+            'values': values,
+            'u_coords': u_range,
+            'v_coords': v_range,
+            'world_points': world_points,
+            'plane_origin': plane_origin,
+            'plane_normal': plane_normal,
+            'plane_u_vector': plane_u_vector,
+            'plane_v_vector': plane_v_vector,
+            'grid_spacing': grid_spacing,
+            'is_exact_grid_plane': False
+        }
+
+    def _check_grid_plane_alignment(self, plane_origin, plane_normal, tolerance=1e-6):
+        """
+        Check if the requested plane coincides with one of the original grid planes.
+        
+        Args:
+            plane_origin: Point on the plane
+            plane_normal: Normalized normal vector of the plane
+            tolerance: Tolerance for checking alignment
+            
+        Returns:
+            dict with plane information if aligned, None otherwise
+        """
+        cube_origin = self.get_origin()
+        
+        # Check alignment with each grid axis
+        for axis in range(3):
+            axis_vector = self.get_axstep(axis)
+            axis_vector_norm = axis_vector / np.linalg.norm(axis_vector)
+            
+            # Check if plane normal is parallel to this axis (perpendicular to plane containing other two axes)
+            if abs(abs(np.dot(plane_normal, axis_vector_norm)) - 1.0) < tolerance:
+                # Check if plane_origin lies on one of the grid planes perpendicular to this axis
+                
+                # Vector from cube origin to plane origin
+                origin_to_plane = plane_origin - cube_origin
+                
+                # Project this vector onto the axis
+                projection_length = np.dot(origin_to_plane, axis_vector_norm)
+                axis_step_length = np.linalg.norm(axis_vector)
+                
+                # Check if this corresponds to an integer grid step
+                grid_index = projection_length / axis_step_length
+                
+                if abs(grid_index - round(grid_index)) < tolerance:
+                    grid_index = int(round(grid_index))
+                    
+                    # Check if grid_index is within bounds
+                    if 0 <= grid_index < self.npts[axis]:
+                        return {
+                            'axis': axis,
+                            'grid_index': grid_index,
+                            'plane_normal': plane_normal.copy(),
+                            'axis_vector_norm': axis_vector_norm.copy()
+                        }
+        
+        return None
+
+    def _extract_grid_plane_data(self, grid_plane_info, scalar_index=0):
+        """
+        Extract exact data from a grid plane without interpolation.
+        
+        Args:
+            grid_plane_info: Information about the aligned grid plane
+            scalar_index: Index of scalar field to extract
+            
+        Returns:
+            dict: Contains exact grid plane data
+        """
+        axis = grid_plane_info['axis']
+        grid_index = grid_plane_info['grid_index']
+        plane_normal = grid_plane_info['plane_normal']
+        
+        # Get the two other axes for the plane
+        other_axes = [i for i in range(3) if i != axis]
+        u_axis, v_axis = other_axes[0], other_axes[1]
+        
+        # Get dimensions for the plane
+        nu, nv = self.npts[u_axis], self.npts[v_axis]
+        
+        # Extract the plane data
+        if self.nval == 1:
+            # For single field data
+            if axis == 0:
+                plane_data = self.cube.reshape(self.npts)[grid_index, :, :]
+            elif axis == 1:
+                plane_data = self.cube.reshape(self.npts)[:, grid_index, :]
+            else:  # axis == 2
+                plane_data = self.cube.reshape(self.npts)[:, :, grid_index]
+        else:
+            # For multi-field data
+            cube_reshaped = self.cube.reshape((self.nval,) + tuple(self.npts))
+            if axis == 0:
+                plane_data = cube_reshaped[scalar_index, grid_index, :, :]
+            elif axis == 1:
+                plane_data = cube_reshaped[scalar_index, :, grid_index, :]
+            else:  # axis == 2
+                plane_data = cube_reshaped[scalar_index, :, :, grid_index]
+        
+        # Create coordinate arrays
+        cube_origin = self.get_origin()
+        u_step = self.get_axstep(u_axis)
+        v_step = self.get_axstep(v_axis)
+        plane_origin_on_grid = cube_origin + grid_index * self.get_axstep(axis)
+        
+        # Generate world coordinates for each grid point
+        world_points = np.zeros((nv, nu, 3))
+        u_coords = np.zeros(nu)
+        v_coords = np.zeros(nv)
+        
+        for i in range(nv):
+            for j in range(nu):
+                world_point = plane_origin_on_grid + j * u_step + i * v_step
+                world_points[i, j] = world_point
+                if i == 0:  # Calculate u_coords only once
+                    u_coords[j] = j * np.linalg.norm(u_step)
+            if j == 0:  # Calculate v_coords only once per row
+                v_coords[i] = i * np.linalg.norm(v_step)
+        
+        # Create plane coordinate system
+        u_vector = u_step / np.linalg.norm(u_step)
+        v_vector = v_step / np.linalg.norm(v_step)
+        
+        return {
+            'values': plane_data,
+            'u_coords': u_coords,
+            'v_coords': v_coords, 
+            'world_points': world_points,
+            'plane_origin': plane_origin_on_grid,
+            'plane_normal': plane_normal,
+            'plane_u_vector': u_vector,
+            'plane_v_vector': v_vector,
+            'grid_spacing': min(np.linalg.norm(u_step), np.linalg.norm(v_step)),
+            'is_exact_grid_plane': True,
+            'grid_axis': axis,
+            'grid_index': grid_index
+        }
+
 
 class ScalarsCube(CubeData):
     """
@@ -733,6 +1027,41 @@ class ScalarsCube(CubeData):
             res = [list(reversed(res[0])),
                    list(reversed(res[1]))]
         return res
+
+    def interpolate_scalar_on_plane(self, scalar_index, plane_origin, plane_normal,
+                                   plane_u_vector=None, plane_v_vector=None,
+                                   grid_size=None):
+        """
+        Interpolate a specific scalar field on a plane.
+        
+        Convenience method for ScalarsCube that wraps the base interpolate_on_plane
+        method with scalar field selection.
+        
+        Args:
+            scalar_index: Index of the scalar field to interpolate, or field label string
+            plane_origin: 3D point defining the origin of the plane (world coordinates)
+            plane_normal: 3D vector defining the normal to the plane
+            plane_u_vector: Optional 3D vector defining the U direction on the plane
+            plane_v_vector: Optional 3D vector defining the V direction on the plane
+            grid_size: Tuple (nu, nv) defining grid dimensions
+            
+        Returns:
+            dict: Contains 'values' (2D array), coordinates, and plane information
+        """
+        # Handle label-based selection
+        if isinstance(scalar_index, str):
+            if scalar_index in self.labels:
+                scalar_index = self.labels.index(scalar_index)
+            else:
+                raise ValueError(f"Scalar field '{scalar_index}' not found in labels: {self.labels}")
+        
+        # Validate scalar index
+        if scalar_index >= self.nval or scalar_index < 0:
+            raise ValueError(f"Scalar index {scalar_index} out of range [0, {self.nval-1}]")
+        
+        return self.interpolate_on_plane(plane_origin, plane_normal,
+                                       plane_u_vector, plane_v_vector,
+                                       grid_size, scalar_index)
 
 
 class VecCubeData(CubeData):
