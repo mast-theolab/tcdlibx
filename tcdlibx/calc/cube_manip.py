@@ -1152,7 +1152,7 @@ class VecCubeData(CubeData):
         if not cube:
             return tmp
         tmp2 = CubeData(self)
-        tmp2.cube = tmp
+        tmp2.cube = tmp * 0.5
         tmp2.nval = 1
         return tmp2
 
@@ -1301,7 +1301,7 @@ class VtcdData(VecCubeData):
         return res
 
 
-class AimCubeData(VtcdData):
+class AimCubeData(VecCubeData):
     """
     cube data masked with AIM partition
     of the space
@@ -1332,11 +1332,35 @@ class AimCubeData(VtcdData):
         define a dictionary entry beetween the actractora and the atoms
         """
         atom_multimap = []
+        total_voxels = self.npts[0] * self.npts[1] * self.npts[2]
+        
         for i_th in range(self.natoms):
             local_atom = [int(x) for x in np.dot(np.linalg.inv(self.loc2wrd),
                                                  np.append(self.crd[i_th], 1))[:3]]
             index = local_atom[0]*self.npts[1]*self.npts[2] +\
                     local_atom[1]*self.npts[2] + local_atom[2]
+                    
+            # Add bounds checking to prevent IndexError
+            if index < 0 or index >= total_voxels:
+                print(f"Warning: Atom {i_th} index {index} is out of bounds [0, {total_voxels-1}]")
+                print(f"  local_atom coords: {local_atom}")
+                print(f"  world coords: {self.crd[i_th]}")
+                print(f"  npts: {self.npts}")
+                # Use a default value or skip this atom
+                atom_multimap.append(0)  # Default to basin 0
+                continue
+                
+            # Additional check for mask array dimensions
+            if hasattr(self.mask, 'shape'):
+                if self.mask.ndim == 1 and index >= len(self.mask):
+                    print(f"Warning: Index {index} exceeds mask length {len(self.mask)}")
+                    atom_multimap.append(0)
+                    continue
+                elif self.mask.ndim == 2 and index >= self.mask.shape[1]:
+                    print(f"Warning: Index {index} exceeds mask second dimension {self.mask.shape[1]}")
+                    atom_multimap.append(0)
+                    continue
+                    
             atom_multimap.append(self.mask[index])
         return atom_multimap
 
@@ -1416,20 +1440,90 @@ class AimCubeData(VtcdData):
             res += tmp.sum(axis=1) * poligon * -1
         return res
 
+    def mu_integrate(self, mask=None):
+        """
+        Integration for electric dipole moment
+        Delegates to appropriate method based on the underlying data type
+        """
+        if hasattr(self, 'evec') and hasattr(self, 'energy'):
+            # This is VTCD data, use specialized integration
+            integrated = self.integrate(mask=mask) * -1 * 2  # Vedi franco?
+            return integrated
+        else:
+            # Regular vector field integration
+            return self.integrate(mask=mask)
+
+    def mag_integrate(self, mask=None, origin=None):
+        """
+        Integration for magnetic dipole moment
+        Delegates to appropriate method based on the underlying data type
+        """
+        if hasattr(self, 'evec') and hasattr(self, 'energy'):
+            # This is VTCD data, use specialized integration
+            poligon = self.get_voxvol()
+            res = self._calc_rot(mask, origin=origin)
+            integrated = res.sum(axis=1) * poligon * -1
+            return integrated
+        else:
+            # Regular rotational integration
+            return self.rotorintegrate(mask=mask, origin=origin)
+
     def get_frags_contribution(self):
         if self._frag is None:
             raise NoValidData('get_frags_contribution', 'Fragments not set')
+        
+        print("\n=== DEBUG: Fragment Contribution Analysis ===")
+        
         res = {'int': [],
                'rot': []}
-        for frg in self._frag:
+        
+        # Debug: Compute total integration without fragments for comparison
+        total_int = self.mu_integrate()
+        total_rot = self.mag_integrate()
+        print("Total integration (no fragments):")
+        print(f"  Electric: {total_int}")
+        print(f"  Magnetic: {total_rot}")
+        print()
+        
+        # Process each fragment
+        for i, frg in enumerate(self._frag):
             mask_tmp = np.full(self.mask.shape, False)
             if isinstance(frg, tuple):
+                atoms_in_frag = list(frg)
                 for atom in frg:
                     mask_tmp += self.get_atom_mask(atom)
             else:
+                atoms_in_frag = [frg]
                 mask_tmp = self.get_atom_mask(frg)
-            res['int'].append(self.mu_integrate(mask_tmp))
-            res['rot'].append(self.mag_integrate(mask_tmp))
+            
+            frag_int = self.mu_integrate(mask_tmp)
+            frag_rot = self.mag_integrate(mask_tmp)
+            
+            res['int'].append(frag_int)
+            res['rot'].append(frag_rot)
+            
+            # Debug: Print each fragment's contribution
+            print(f"Fragment {i+1} (atoms {[a+1 for a in atoms_in_frag]}):")
+            print(f"  Electric: {frag_int}")
+            print(f"  Magnetic: {frag_rot}")
+        
+        # Debug: Compute and display sum of fragments
+        sum_int = np.sum(res['int'], axis=0)
+        sum_rot = np.sum(res['rot'], axis=0)
+        print()
+        print("Sum of all fragments:")
+        print(f"  Electric: {sum_int}")
+        print(f"  Magnetic: {sum_rot}")
+        
+        # Debug: Show difference between total and sum of fragments
+        diff_int = total_int - sum_int
+        diff_rot = total_rot - sum_rot
+        print()
+        print("Difference (Total - Sum of fragments):")
+        print(f"  Electric: {diff_int}")
+        print(f"  Magnetic: {diff_rot}")
+        print("============================================\n")
+        
         return res
 
     def get_frag_isosurf(self):
@@ -1460,9 +1554,22 @@ class AimCubeData(VtcdData):
                     mask_brd[i, indx] = 1
                 else:
                     xyz_rel = relpos + np.array(xyz)
-                    rel_indx = [self._cubetolinear(x) for x in xyz_rel]
-                    if mask_tmp[rel_indx].all():
-                        mask_brd[i, indx] = 1
+                    # Check bounds for all relative positions before calculating indices
+                    valid_positions = []
+                    rel_indx = []
+                    for pos in xyz_rel:
+                        if (pos[0] >= 0 and pos[0] < self.npts[0] and
+                            pos[1] >= 0 and pos[1] < self.npts[1] and
+                            pos[2] >= 0 and pos[2] < self.npts[2]):
+                            rel_indx.append(self._cubetolinear(pos))
+                            valid_positions.append(True)
+                        else:
+                            valid_positions.append(False)
+                    
+                    # Only check mask if we have valid indices and all positions are valid
+                    if len(rel_indx) == len(xyz_rel) and all(valid_positions):
+                        if mask_tmp[rel_indx].all():
+                            mask_brd[i, indx] = 1
         tmpcube.cube = mask_brd
         return tmpcube
              

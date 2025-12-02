@@ -77,6 +77,7 @@ class TCDvis(QMainWindow):
         self._activest = 0
         self._actors = {}
         self._menus = {}
+        self._has_auto_fragment = False  # Track if automatic fragment for missing atoms was created
         
         # Animation variables for streamline particles
         self._animation_timer = None
@@ -150,6 +151,16 @@ class TCDvis(QMainWindow):
         grpsButton.setEnabled(False)
         self._menus['mol']['grps'] = grpsButton
         fileMol.addAction(grpsButton)
+        
+        # Molecule transparency toggle
+        transparentButton = QAction(QIcon(''), 'Transparent Molecule', self)
+        transparentButton.setStatusTip('Make molecule transparent (alpha 0.3)')
+        transparentButton.setCheckable(True)
+        transparentButton.triggered.connect(self.toggle_mol_transparency)
+        transparentButton.setEnabled(False)
+        self._menus['mol']['transparent'] = transparentButton
+        fileMol.addAction(transparentButton)
+        
         # NM buttons
         nmmenu = fileMol.addMenu('NM')
         nmmenu.setEnabled(False)
@@ -538,13 +549,17 @@ class TCDvis(QMainWindow):
     def _enable_molmenu(self):
         for val in self._menus['mol']:
             #print(val)
-            if not val == 'nm' and val not in 'dmt':
+            if not val == 'nm' and 'dmt' not in val:
                 self._menus['mol'][val].setEnabled(True)
-            elif self._moltype == 'vib':
-                self._menus['mol']['nm']['menu'].setEnabled(True)
-                self._menus['vibdmt']['menu'].setEnabled(True)
-            elif self._moltype == 'ele':
-                self._menus['eledmt']['menu'].setEnabled(True)
+                
+        # Enable molecule-type specific menus
+        if self._moltype == 'vib':
+            self._menus['mol']['nm']['menu'].setEnabled(True)
+            self._menus['vibdmt']['menu'].setEnabled(True)
+        elif self._moltype == 'ele':
+            self._menus['eledmt']['menu'].setEnabled(True)
+            
+        # Enable TCD menus based on molecule type
         if self._moltype == 'ele':
             self._menus['etcd']['tcd'].setEnabled(True)
         elif self._moltype == 'vib':
@@ -719,6 +734,7 @@ class TCDvis(QMainWindow):
 
         self._cleanactors()
         self._actors = {}
+        self._has_auto_fragment = False  # Reset auto-fragment flag when opening new file
         # for key in self._actors:
         #     self._actors[key] = None
         self._updatenst()
@@ -742,12 +758,18 @@ class TCDvis(QMainWindow):
             cubdata = VecCubeData(cube_parser(cub._cube))
             self._menus['etcd']["aim"].setEnabled(True)
             self._menus['etcd']['dmt'].setEnabled(True)
+            # Enable fragment contributions if AIM data and fragments are available
+            if self._fchk._aimdata is not None and self._fchk._frags is not None:
+                self._menus['etcddtm']['frags'].setEnabled(True)
         else:
             cubdata = VtcdData(cube_parser(cub._cube),
                            self._fchk._moldata['evec'][cub._vib-1],
                            self._fchk._moldata['freq'][cub._vib-1])
             self._menus['vtcd']["aim"].setEnabled(True)
             self._menus['vtcd']['dmt'].setEnabled(True)
+            # Enable fragment contributions if AIM data and fragments are available
+            if self._fchk._aimdata is not None and self._fchk._frags is not None:
+                self._menus['vtcddtm']['frags'].setEnabled(True)
         self._fchk.add_tcd(cub._vib-1, cubdata)
         self.stline.setText(f"{cub._vib}")
         self._setstate()
@@ -755,18 +777,27 @@ class TCDvis(QMainWindow):
     def open_aim(self):
         fname = QFileDialog.getOpenFileName(self, 'Select AIM cube file', '.','*.cube')[0]
         aimcube = cube_parser(fname)
-        if aimcube.nval != 1:
+        if aimcube.nval == 1:
+            pass  # OK
+        elif aimcube.nval == 2:
+            print("Debug: Aberto's cube, only 2nd value kept for now")
+            aimcube.nval = 1
+            # Keep the second value and ensure proper 1D structure
+            aimcube.cube = aimcube.cube[1, :]
+        else:
             raise NoValidData("open_aim", "aim cube must contain a single scalar dataset")
         self._fchk.add_aim(aimcube)
         if self._fchk._frags is not None:
             if self._moltype == 'ele':
-                self._menus['etcddtm']["saim"].setEnabled(True)
+                self._menus['etcd']["saim"].setEnabled(True)
             elif self._moltype == 'vib':
-                self._menus['vtcddtm']["saim"].setEnabled(True)
+                self._menus['vtcd']["saim"].setEnabled(True)
             if self._activest in self._fchk.avail_tcd():
                 if self._moltype == 'ele':
-                    self._menus['etcddtm']['dmt'].setEnabled(True)
+                    self._menus['etcd']['dmt'].setEnabled(True)
+                    self._menus['etcddtm']['frags'].setEnabled(True)
                 elif self._moltype == 'vib':
+                    self._menus['vtcd']['dmt'].setEnabled(True)
                     self._menus['vtcddtm']['frags'].setEnabled(True)
 
     def opengroups(self):
@@ -778,16 +809,38 @@ class TCDvis(QMainWindow):
                 natm = self._fchk.natoms
             else:
                 natm = int(jdata["molecule"]["natoms"])
+            
+            # Process fragments from JSON
             for i in jdata["molecule"]["frags"]:
                 if isinstance(i["fr_index"], str):
                     tmp = range_parse(i["fr_index"], natm, flatten=True)
                 else:
                     tmp = i['fr_index']
                 res.append([x-1 for x in tmp])
+            
+            # Check for atoms not included in any fragment
+            all_listed_atoms = set()
+            for frag in res:
+                all_listed_atoms.update(frag)
+            
+            all_atoms = set(range(natm))
+            unlisted_atoms = all_atoms - all_listed_atoms
+            
+            # Add unlisted atoms as an additional fragment if any exist
+            self._has_auto_fragment = False
+            if unlisted_atoms:
+                unlisted_list = sorted(list(unlisted_atoms))
+                res.append(unlisted_list)
+                self._has_auto_fragment = True  # Flag to track auto-created fragment
+                print(f"Added unlisted atoms to additional fragment: {[x+1 for x in unlisted_list]}")
+            
             self._fchk.set_fragment(res)
             if (self._fchk._aimdata is not None and 
-                self._activenm in self._fchk.avail_tcd()):
-                self._menus['vtcddtm']['frags'].setEnabled(True)
+                self._activest in self._fchk.avail_tcd()):
+                if self._moltype == 'ele':
+                    self._menus['etcddtm']['frags'].setEnabled(True)
+                elif self._moltype == 'vib':
+                    self._menus['vtcddtm']['frags'].setEnabled(True)
 
             # FIXME
             # self.__color = random_colors(len(res))
@@ -841,8 +894,14 @@ class TCDvis(QMainWindow):
             self.isoline.setEnabled(True)
             if self._moltype == 'ele':
                 self._menus['etcd']['dmt'].setEnabled(True)
+                # Enable fragment contributions if AIM data and fragments are available
+                if self._fchk._aimdata is not None and self._fchk._frags is not None:
+                    self._menus['etcddtm']['frags'].setEnabled(True)
             elif self._moltype == 'vib':
                 self._menus['vtcd']['dmt'].setEnabled(True)
+                # Enable fragment contributions if AIM data and fragments are available
+                if self._fchk._aimdata is not None and self._fchk._frags is not None:
+                    self._menus['vtcddtm']['frags'].setEnabled(True)
         else:
             self.stline.setStyleSheet("color: black;  background-color: white")
             self.etcdch.setEnabled(False)
@@ -1076,12 +1135,6 @@ class TCDvis(QMainWindow):
         if 'tcddir' in self._actors:
             self.ren.AddActor(self._actors['tcddir'].actor)
         
-        # Refresh DTM vectors if they were previously displayed
-        if 'mfpdtm' in self._actors:
-            self.showdmt()
-        if 'tcddtm' in self._actors:
-            self.showtcdmt()
-        
         self._updatereder()
 
     def shownm(self):
@@ -1098,15 +1151,50 @@ class TCDvis(QMainWindow):
             self.ren.AddActor(self._actors['nm'].actor)
         self._updatereder()
 
+    def toggle_mol_transparency(self):
+        """Toggle molecule transparency between opaque and semi-transparent"""
+        if 'mol' in self._actors:
+            is_transparent = self._menus['mol']['transparent'].isChecked()
+            alpha = 0.3 if is_transparent else 1.0
+            
+            # Apply transparency to all parts of the molecule
+            mol_actor = self._actors['mol'].actor
+            mol_actor.GetProperty().SetOpacity(alpha)
+            
+            # If there are multiple components (atoms, bonds, etc.), apply to all
+            if hasattr(self._actors['mol'], 'sphere_actors'):
+                for sphere_actor in self._actors['mol'].sphere_actors:
+                    sphere_actor.GetProperty().SetOpacity(alpha)
+            
+            if hasattr(self._actors['mol'], 'cylinder_actors'):
+                for cyl_actor in self._actors['mol'].cylinder_actors:
+                    cyl_actor.GetProperty().SetOpacity(alpha)
+                    
+            self._updatereder()
+
     # AIM functions
     def show_aim_space(self):
-        if self._menus['vtcd']['saim'].isChecked():
+        # Check the correct menu based on molecule type
+        saim_checked = False
+        if self._moltype == 'ele':
+            saim_checked = self._menus['etcd']['saim'].isChecked()
+        elif self._moltype == 'vib':
+            saim_checked = self._menus['vtcd']['saim'].isChecked()
+            
+        if saim_checked:
             ind = self._fchk.avail_tcd()[0]
             tmp_cube = self._fchk.get_tcd(ind).get_frag_isosurf()
             tmp_cube.loc2wrd *=  PHYSFACT.bohr2ang 
             colors = self._fchk.get_frag_colors()
             grids = cubetk.fillcubeimage(tmp_cube, vec=False, aslist=True)
-            for i, grd in enumerate(grids):
+            
+            # Determine how many fragments to display (skip auto-generated fragment if it exists)
+            num_fragments = len(grids)
+            if self._has_auto_fragment:
+                num_fragments -= 1  # Skip the last fragment (auto-generated for missing atoms)
+            
+            for i in range(num_fragments):
+                grd = grids[i]
                 isoactor = cubetk._countur(grd, [1],
                                          active="scalar",
                                          colors=[colors[i]],
@@ -1114,9 +1202,11 @@ class TCDvis(QMainWindow):
                 self.ren.AddActor(isoactor.actor)
                 self._actors[f"aimiso{i:d}"] = isoactor
         else:
-            if "aimiso0" in self._actors:
-                for i in range(self._fchk.nfrags):
-                    self.ren.RemoveActor(self._actors[f"aimiso{i:d}"].actor)
+            # Remove all existing AIM isosurfaces
+            aimiso_keys = [key for key in self._actors.keys() if key.startswith("aimiso")]
+            for key in aimiso_keys:
+                self.ren.RemoveActor(self._actors[key].actor)
+                del self._actors[key]
         self._updatereder()
 
 

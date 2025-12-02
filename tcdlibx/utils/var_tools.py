@@ -232,7 +232,13 @@ def range_parse(string, dimension=None, flatten=False):
             else:
                 grp_elem.append(toadd)
     if flatten:
-        grp_elem = [item for sublist in grp_elem for item in sublist]
+        flattened = []
+        for item in grp_elem:
+            if isinstance(item, list):
+                flattened.extend(item)
+            else:
+                flattened.append(item)
+        grp_elem = flattened
     return grp_elem
 
 
