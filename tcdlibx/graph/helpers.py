@@ -20,7 +20,7 @@ def random_colors(ncolors: int) -> list[list[float]]:
     return color
 
 
-def filtervecatom(cubefile: CubeData, thresh: float = 0.15) -> list[int]:
+def filtervecatom(cubefile: CubeData, thresh: float = 0.1) -> list[int]:
     """Returns the indices of voxels too close to the atomic centre
     defined as closer to thresh(default=0.15)*vdw radius in bohr
 
@@ -35,6 +35,58 @@ def filtervecatom(cubefile: CubeData, thresh: float = 0.15) -> list[int]:
         if tmp_index:
             res.extend(tmp_index)
     return list(set(res))
+
+
+def molecular_voxels(cubefile: CubeData, maxthresh: float = 1.5, minthresh: float = .3) -> list[int]:
+    """Returns the indices of the grid points within 
+
+    Args:
+        cubefile (CubeData): _description_
+        maxthresh (float, optional): _description_. Defaults to 1.
+        minthresh (float, optional): _description_. Defaults to .15.
+
+    Returns:
+        list[int]: _description_
+    """
+    res = []
+    radii = [atomic_data(int(x))[int(x)]['rvdw']/PHYSFACT.bohr2ang for x in cubefile.ian]
+    for i in range(cubefile.crd.shape[0]):
+        tmp_index_all = cubefile.indexinsphere(cubefile.crd[i], radii[i]*maxthresh).tolist()
+        tmp_index_inner = cubefile.indexinsphere(cubefile.crd[i],
+                                           radii[i]*minthresh).tolist()
+        tmp_index = list(set(tmp_index_all) - set(tmp_index_inner))
+        if tmp_index:
+            res.extend(tmp_index)
+    return list(set(res))
+
+def sample_molecular_volume(cubefile: CubeData, npoints: int, scale: float = 1.5) -> np.ndarray:
+    """Sample points within the molecular volume defined by the VDW radii
+
+    Args:
+        cubefile (CubeData): _description_
+        npoints (int): _description_
+        scale (float, optional): _description_. Defaults to 1..
+
+    Returns:
+        np.ndarray: _description_
+    """
+    mol_voxel_indices = molecular_voxels(cubefile, maxthresh=scale, minthresh=0.1*scale)
+    mol_voxel_indices = np.array(mol_voxel_indices, dtype=int)
+    
+    if mol_voxel_indices.shape[0] > npoints:
+        selindx = np.random.choice(mol_voxel_indices.shape[0], npoints, replace=False)
+        selected_indices = mol_voxel_indices[selindx]
+    else:
+        selected_indices = mol_voxel_indices
+    
+    if not cubefile.box.size:
+        cubefile.make_box()
+    
+    selected_coords = cubefile.box[:, selected_indices].T
+    
+    return selected_coords * PHYSFACT.bohr2ang  # Convert to Angstroms
+
+
 
 def nuclear_tensors(atnums: np.ndarray, atcrds: np.ndarray) -> dict[str, np.ndarray]:
     natoms = atnums.shape[0]
@@ -140,6 +192,7 @@ class Molecule():
         self._samplepoints = getellipsoid(self._moldata['atcrd'][mask, :],
                                           np.array(self._moldata['atnum'])[mask],
                                           npts, scale)
+        return self._samplepoints
             
 
 class VibMolecule(Molecule):

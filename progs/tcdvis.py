@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 
 # Local imports - tcdlibx package
 from tcdlibx.calc.cube_manip import VecCubeData, VtcdData, cube_parser
-from tcdlibx.graph.helpers import EleMolecule, VibMolecule, filtervecatom
+from tcdlibx.graph.helpers import EleMolecule, VibMolecule, filtervecatom, sample_molecular_volume
 import tcdlibx.graph.cube_graphvtk as cubetk
 from tcdlibx.gui.dialogs import (
     SavePngDialog, SavePngSeriesDialog, StreamLineSetupDialog, TCDDialog, QuiverSetupDialog, SaveSceneDialog, NMConfigDialog, MoleculeConfigDialog
@@ -85,6 +85,7 @@ class TCDvis(QMainWindow):
         self._animation_step = 0
         self._animation_speed = 0.02
         self._show_particles = False
+        self._seeds = None
         
         self._default = {'isoval': {'iso': 0.01},
                          'vfield': {'vfmax': 1e2,
@@ -92,6 +93,8 @@ class TCDvis(QMainWindow):
                                     'mspeed': None,
                                     'npoints': 100,
                                     'scalellipse': 3.,
+                                    'scalevdw': 2.0,
+                                    'sampling_method': 'ellipsoid',
                                     'showdir': False,
                                     'showell': False,
                                     'conescale': .1,
@@ -658,7 +661,9 @@ class TCDvis(QMainWindow):
                                              showbar=self._default["vfield"]["showbar"],
                                              animate_particles=self._default["vfield"]["animate_particles"],
                                              num_particles=self._default["vfield"]["num_particles"],
-                                             particle_type=self._default["vfield"]["particle_type"],)
+                                             particle_type=self._default["vfield"]["particle_type"],
+                                             sampling_method=self._default["vfield"]["sampling_method"],
+                                             scalevdw=self._default["vfield"]["scalevdw"],)
             fieldprm.exec()
             # Update the default values
             self._default["vfield"]["vfmax"] = fieldprm._vfmax
@@ -666,8 +671,14 @@ class TCDvis(QMainWindow):
             self._default["vfield"]["mspeed"] = fieldprm._mspeed
             
             if fieldprm._recalseeds:
-                self._fchk.sample_ellipse_space(npts=fieldprm._nseeds, scale=fieldprm._scale)
+                if fieldprm._sampling_method == "ellipsoid":
+                    self._seeds = self._fchk.sample_ellipse_space(npts=fieldprm._nseeds, scale=fieldprm._scale)
+                else:  # molecular volume
+                    current_tcd = self._fchk.get_tcd(self._activest)
+                    self._seeds = sample_molecular_volume(current_tcd, fieldprm._nseeds, scale=fieldprm._scalevdw)
             self._default["vfield"]["scalellipse"] = fieldprm._scale
+            self._default["vfield"]["scalevdw"] = fieldprm._scalevdw
+            self._default["vfield"]["sampling_method"] = fieldprm._sampling_method
             self._default["vfield"]["npoints"] = fieldprm._nseeds
             self._default["vfield"]["showdir"] = fieldprm._direction
             self._default["vfield"]["showell"] = fieldprm._showellipse
@@ -724,16 +735,20 @@ class TCDvis(QMainWindow):
                         del self._actors['tcdbar']
                     if fieldprm._direction and 'tcddir' not in self._actors:
                         tmp_cube = copy.deepcopy(self._fchk.get_tcd(self._activest))
-                        self._actors['tcddir'] = cubetk.draw_cones_nogrid(tmp_cube, self._fchk.samplepoints)
+                        self._actors['tcddir'] = cubetk.draw_cones_nogrid(tmp_cube, self._seeds)
                         self.ren.AddActor(self._actors['tcddir'].actor)
                     elif 'tcddir' in self._actors:
                         self.ren.RemoveActor(self._actors['tcddir'].actor)
                         del self._actors['tcddir']
 
             if fieldprm._showellipse:
-                if self._fchk.samplepoints is None:
-                    self._fchk.sample_ellipse_space(self._default["vfield"]["npoints"], scale=self._default["vfield"]["scalellipse"])
-                self._actors['ellipse'] = cubetk.draw_ellipsoid(self._fchk.samplepoints)
+                if self._seeds is None:
+                    if self._default["vfield"]["sampling_method"] == "ellipsoid":
+                        self._seeds = self._fchk.sample_ellipse_space(self._default["vfield"]["npoints"], scale=self._default["vfield"]["scalellipse"])
+                    else:  # molecular volume
+                        current_tcd = self._fchk.get_tcd(self._activest)
+                        self._seeds = sample_molecular_volume(current_tcd, self._default["vfield"]["npoints"], scale=self._default["vfield"]["scalevdw"])
+                self._actors['ellipse'] = cubetk.draw_ellipsoid(self._seeds)
                 self.ren.AddActor(self._actors['ellipse'].actor)
             elif 'ellipse' in self._actors:
                 self.ren.RemoveActor(self._actors['ellipse'].actor)
@@ -1116,18 +1131,22 @@ class TCDvis(QMainWindow):
         tmp_iso = [-self._default['isoval']['iso'],
                    self._default['isoval']['iso']]
         if prop_cur == "streamlines":
-            if self._fchk.samplepoints is None:
-                self._fchk.sample_ellipse_space(self._default["vfield"]["npoints"], scale=self._default["vfield"]["scalellipse"])
+            if self._seeds is None:
+                if self._default["vfield"]["sampling_method"] == "ellipsoid":
+                    self._seeds = self._fchk.sample_ellipse_space(self._default["vfield"]["npoints"], scale=self._default["vfield"]["scalellipse"])
+                else:  # molecular volume
+                    current_tcd = self._fchk.get_tcd(self._activest)
+                    self._seeds = sample_molecular_volume(current_tcd, self._default["vfield"]["npoints"], scale=self._default["vfield"]["scalevdw"])
             tmp_cube.loc2wrd *=  PHYSFACT.bohr2ang
             self._actors['tcd'] =  cubetk.fillstreamline(tmp_cube,
                                                          clipping=(self._default["vfield"]["vfmax"],
                                                                     self._default["vfield"]["vfmin"]),
                                                          minspeed=self._default["vfield"]["mspeed"],
-                                                         seeds=self._fchk.samplepoints)
+                                                         seeds=self._seeds)
             if self._default["vfield"]["showbar"]:
                 self._actors['tcdbar'] = cubetk.draw_colorbar(self._actors['tcd'].actor, "Norm(J)")
             if self._default["vfield"]["showdir"]:
-                self._actors['tcddir'] = cubetk.draw_cones_nogrid(tmp_cube, self._fchk.samplepoints)
+                self._actors['tcddir'] = cubetk.draw_cones_nogrid(tmp_cube, self._seeds)
             
             # Add animated particles if enabled
             if self._default["vfield"]["animate_particles"]:

@@ -4,7 +4,7 @@ from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QGridLayout
 from PySide6.QtCore import QRegularExpression, QLocale, Qt
 from PySide6.QtGui import QRegularExpressionValidator, QIntValidator, QDoubleValidator
 from PySide6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QCheckBox, QComboBox
-from PySide6.QtWidgets import QLineEdit, QFileDialog, QPushButton, QMessageBox, QColorDialog, QSlider
+from PySide6.QtWidgets import QLineEdit, QFileDialog, QPushButton, QMessageBox, QColorDialog, QSlider, QRadioButton, QButtonGroup
 from tcdlibx.utils.var_tools import fuzzy_equal
 
 class SavePngDialog(QDialog):
@@ -783,6 +783,8 @@ class StreamLineSetupDialog(QDialog):
                  animate_particles: bool = False,
                  num_particles: int = 15,
                  particle_type: str = "sphere",
+                 sampling_method: str = "ellipsoid",
+                 scalevdw: float = 1.0,
                  parent: tp.Optional[tp.Union[QDialog, None]] = None,
                  ) -> None:
         """ initialize the dialog. Requires a dictionary with the parameters,
@@ -805,6 +807,8 @@ class StreamLineSetupDialog(QDialog):
         self._animate_particles = animate_particles
         self._num_particles = num_particles
         self._particle_type = particle_type
+        self._sampling_method = sampling_method
+        self._scalevdw = scalevdw
         self._recalseeds = False
         self._redrawstream = False
         # print(f"vfmax:{self._vfmax} vfmin:{self._vfmin} mspeed:{self._mspeed} nseeds:{self._nseeds} scale:{self._scale}")
@@ -861,16 +865,46 @@ class StreamLineSetupDialog(QDialog):
         seedvalid.setRange(1, 500)
         self._seedline = EditIntLine("Number of seeds", nseeds, seedvalid)
         grid.addItem(self._seedline._hlay, 2, 1)
+        # Ellipsoid scaling factor
         scaleval = QDoubleValidator()
         scaleval.setLocale(QLocale('English'))
         scaleval.setRange(.2, 10.)
         self._scalemol = EditDoubleLine("Ellipsoid scaling factor", scale, scaleval)
         grid.addItem(self._scalemol._hlay, 3, 1)
+        
+        # Sampling method selection
+        sampling_group_label = QLabel("Sampling method:")
+        grid.addWidget(sampling_group_label, 4, 1)
+        
+        self._sampling_group = QButtonGroup()
+        self._ellipsoid_radio = QRadioButton("Ellipsoid")
+        self._molvolume_radio = QRadioButton("Mol. volume")
+        
+        if sampling_method == "ellipsoid":
+            self._ellipsoid_radio.setChecked(True)
+        else:
+            self._molvolume_radio.setChecked(True)
+            
+        self._sampling_group.addButton(self._ellipsoid_radio, 0)
+        self._sampling_group.addButton(self._molvolume_radio, 1)
+        self._ellipsoid_radio.toggled.connect(self._update_sampling_method)
+        
+        sampling_hlay = QHBoxLayout()
+        sampling_hlay.addWidget(self._ellipsoid_radio)
+        sampling_hlay.addWidget(self._molvolume_radio)
+        grid.addLayout(sampling_hlay, 5, 1)
+        
+        # VDW scaling factor
+        scalevdwval = QDoubleValidator()
+        scalevdwval.setLocale(QLocale('English'))
+        scalevdwval.setRange(.2, 5.)
+        self._scalevdw = EditDoubleLine("VDW radius scaling", scalevdw, scalevdwval)
+        grid.addItem(self._scalevdw._hlay, 6, 1)
         particlevalid = QIntValidator()
         particlevalid.setLocale(QLocale('English'))
         particlevalid.setRange(1, 50)  # Reasonable range for particles
         self._particleline = EditIntLine("Number of particles", num_particles, particlevalid)
-        grid.addItem(self._particleline._hlay, 6, 1)  # Align with animation checkbox
+        grid.addItem(self._particleline._hlay, 7, 1)  # Move down to accommodate new controls
         # Set initial state of particle count field based on animation checkbox
         self._particleline._line.setEnabled(animate_particles)
         
@@ -883,13 +917,16 @@ class StreamLineSetupDialog(QDialog):
         hlay_particle_type = QHBoxLayout()
         hlay_particle_type.addWidget(particle_type_label)
         hlay_particle_type.addWidget(self._particle_type_combo)
-        grid.addItem(hlay_particle_type, 7, 1)
+        grid.addItem(hlay_particle_type, 8, 1)
         
-        self._genseeds = QPushButton('Resample the ellissoide', self)
+        self._genseeds = QPushButton('Resample seeds', self)
         self._genseeds.clicked.connect(self._setresample)
         hlay_tmp = QHBoxLayout()
         hlay_tmp.addWidget(self._genseeds)
-        grid.addItem(hlay_tmp, 4, 1)
+        grid.addItem(hlay_tmp, 9, 1)
+
+        # Enable/disable controls based on sampling method
+        self._update_sampling_method()
 
         # add text to the dialog
         QBtn = QDialogButtonBox.Ok | QDialogButtonBox.Cancel 
@@ -903,6 +940,21 @@ class StreamLineSetupDialog(QDialog):
         self.vlay.addWidget(self.buttonBox)
         self.setLayout(self.vlay)
 
+    def _update_sampling_method(self):
+        """Update UI controls based on selected sampling method"""
+        ellipsoid_selected = self._ellipsoid_radio.isChecked()
+        self._scalemol._line.setEnabled(ellipsoid_selected)
+        self._scalevdw._line.setEnabled(not ellipsoid_selected)
+        
+        # Update sampling method
+        self._sampling_method = "ellipsoid" if ellipsoid_selected else "molvolume"
+        
+        # Update resample button text
+        if ellipsoid_selected:
+            self._genseeds.setText('Resample ellipsoid')
+        else:
+            self._genseeds.setText('Resample mol. volume')
+    
     def _setvals(self):
         self._vfmax = self._upmes._getvalue()
         if self._upmes.edit:
@@ -921,10 +973,16 @@ class StreamLineSetupDialog(QDialog):
         if self._scalemol.edit:
             self._recalseeds = True
             self._redrawstream = True
+        scalevdw_value = self._scalevdw._getvalue()
+        if self._scalevdw.edit:
+            self._recalseeds = True
+            self._redrawstream = True
+        self._scalevdw = scalevdw_value
         self._num_particles = self._particleline._getvalue()
         if self._particleline.edit:
             self._redrawstream = True
         self._particle_type = self._particle_type_combo.currentText()
+        self._sampling_method = "ellipsoid" if self._ellipsoid_radio.isChecked() else "molvolume"
         # print(f"vfmax:{self._vfmax} vfmin:{self._vfmin} mspeed:{self._mspeed} nseeds:{self._nseeds} scale:{self._scale}")
 
     def _setresample(self):
