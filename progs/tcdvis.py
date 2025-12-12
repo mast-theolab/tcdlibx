@@ -27,10 +27,10 @@ from tcdlibx.calc.cube_manip import VecCubeData, VtcdData, cube_parser
 from tcdlibx.graph.helpers import EleMolecule, VibMolecule, filtervecatom
 import tcdlibx.graph.cube_graphvtk as cubetk
 from tcdlibx.gui.dialogs import (
-    SavePngDialog, SavePngSeriesDialog, StreamLineSetupDialog, TCDDialog, QuiverSetupDialog
+    SavePngDialog, SavePngSeriesDialog, StreamLineSetupDialog, TCDDialog, QuiverSetupDialog, SaveSceneDialog, NMConfigDialog
 )
 from tcdlibx.io.estp_io import PHYSFACT, get_elemol, get_vibmol
-from tcdlibx.io.jsonio import read_json
+from tcdlibx.io.jsonio import read_json, write_json
 from tcdlibx.utils.custom_except import NoValidData
 from tcdlibx.utils.var_tools import range_parse
 from tcdlibx.utils.vtk_utils import QVTKRenderWindowInteractor, vtk
@@ -100,7 +100,10 @@ class TCDvis(QMainWindow):
                                     'num_particles': 15,
                                     'particle_type': 'sphere'},
                          'quiver': {'scale': 100,
-                                   'subsample': 5},}
+                                   'subsample': 5},
+                         'nmconfig': {'invert_phase': False,
+                                     'scale_factor': 1.0,
+                                     'color': (0.0, 0.0, 1.0)},}
 
         self.initUI()
 
@@ -136,6 +139,19 @@ class TCDvis(QMainWindow):
         gifButton.setStatusTip('Save pngs to make a gif')
         gifButton.triggered.connect(self.save_png_rotation)
         fileMenu.addAction(gifButton)
+        # Open a Scene
+        osceneButton = QAction(QIcon(''), 'OpenScene', self)
+        #openButton.setShortcut('Ctrl+O')
+        osceneButton.setStatusTip('Open a VTKScene from a JSON file')
+        osceneButton.triggered.connect(self.open_scene)
+        fileMenu.addAction(osceneButton)
+        # Save a Scene
+        ssceneButton = QAction(QIcon(''), 'SaveScene', self)
+        # saveButton.setShortcut('Ctrl+S')
+        ssceneButton.setStatusTip('Save a VKScene in a JSON file')
+        ssceneButton.triggered.connect(self.save_scene)
+        fileMenu.addAction(ssceneButton)
+
         ## Exit
         exitButton = QAction(QIcon('exit24.png'), 'Exit', self)
         exitButton.setShortcut('Ctrl+Q')
@@ -173,13 +189,12 @@ class TCDvis(QMainWindow):
         nmmenu.addAction(nmButton)
         self._menus['mol']['nm']['menu'] = nmmenu
         self._menus['mol']['nm']['disp'] = nmButton
-        nmRevert = QAction(QIcon(''), 'Change NM phase', self)
-        nmRevert.setStatusTip('Change the phase of the NM vectors')
-        nmRevert.setCheckable(True)
-        nmRevert.triggered.connect(self.shownm)
-        nmRevert.setEnabled(True)
-        nmmenu.addAction(nmRevert)
-        self._menus['mol']['nm']['revert'] = nmRevert
+        nmConfig = QAction(QIcon(''), 'Configure NM', self)
+        nmConfig.setStatusTip('Configure normal mode display options (phase, scale, color)')
+        nmConfig.triggered.connect(self.configure_nm)
+        nmConfig.setEnabled(True)
+        nmmenu.addAction(nmConfig)
+        self._menus['mol']['nm']['config'] = nmConfig
         # Ele. DMT
         fileEDmt = fileMol.addMenu('Ele. DTMs')
         fileEDmt.setEnabled(False) 
@@ -459,10 +474,14 @@ class TCDvis(QMainWindow):
         pngdialog.exec()
         self._lastfname = pngdialog._fname
         if pngdialog._okexit:
+            # Calculate magnification factor based on DPI
+            # VTK default is approximately 72 DPI
+            magnification = max(1, int(pngdialog._dpi / 72))
+            
             # w2if = vtk.vtkWindowToImageFilter()
             w2if = vtk.vtkRenderLargeImage()
             w2if.SetInput(self.ren)
-            w2if.SetMagnification(6)
+            w2if.SetMagnification(magnification)
             # w2if.SetInputBufferTypeToRGB()
             # w2if.ReadFrontBufferOff()
             w2if.Update()
@@ -545,6 +564,27 @@ class TCDvis(QMainWindow):
     # menu functions
     def _cjclose(self):
         self.close()
+
+    def _reset_interface_state(self):
+        """Reset interface state when switching between molecule types"""
+        # Reset normal mode checkboxes (only relevant for vibrational molecules)
+        if 'mol' in self._menus and 'nm' in self._menus['mol']:
+            if 'disp' in self._menus['mol']['nm']:
+                self._menus['mol']['nm']['disp'].setChecked(False)
+        
+        # Reset normal mode configuration to defaults
+        self._default['nmconfig'] = {
+            'invert_phase': False,
+            'scale_factor': 1.0,
+            'color': (0.0, 0.0, 1.0)
+        }
+        
+        # Reset transparency checkbox
+        if 'mol' in self._menus and 'transparent' in self._menus['mol']:
+            self._menus['mol']['transparent'].setChecked(False)
+        
+        # Reset any other interface elements that might cause conflicts
+        # between vibrational and electronic molecule types
 
     def _enable_molmenu(self):
         for val in self._menus['mol']:
@@ -735,6 +775,10 @@ class TCDvis(QMainWindow):
         self._cleanactors()
         self._actors = {}
         self._has_auto_fragment = False  # Reset auto-fragment flag when opening new file
+        
+        # Reset interface state to prevent issues when switching molecule types
+        self._reset_interface_state()
+        
         # for key in self._actors:
         #     self._actors[key] = None
         self._updatenst()
@@ -917,8 +961,8 @@ class TCDvis(QMainWindow):
         if 'tcddtm' in self._actors:
             self.showtcdmt()
         
-        # Refresh NM visualization if it's currently displayed
-        if self._menus['mol']['nm']['disp'].isChecked():
+        # Refresh NM visualization if it's currently displayed (only for vibrational molecules)
+        if self._moltype == 'vib' and self._menus['mol']['nm']['disp'].isChecked():
             self.shownm()
 
     def showdmt(self):
@@ -1137,17 +1181,44 @@ class TCDvis(QMainWindow):
         
         self._updatereder()
 
+    def configure_nm(self):
+        """Open dialog to configure normal mode display options"""
+        config_dialog = NMConfigDialog(
+            parent=self,
+            invert_phase=self._default['nmconfig']['invert_phase'],
+            scale_factor=self._default['nmconfig']['scale_factor'],
+            color=self._default['nmconfig']['color']
+        )
+        
+        config_dialog.exec()
+        
+        if config_dialog._okexit:
+            # Update configuration
+            self._default['nmconfig']['invert_phase'] = config_dialog._invert_phase
+            self._default['nmconfig']['scale_factor'] = config_dialog._scale_factor
+            self._default['nmconfig']['color'] = config_dialog._color
+            
+            # Refresh display if NM is currently shown
+            if self._menus['mol']['nm']['disp'].isChecked():
+                self.shownm()
+
     def shownm(self):
         if 'nm' in self._actors:
             self.ren.RemoveActor(self._actors['nm'].actor)
             del self._actors['nm']
         if self._menus['mol']['nm']['disp'].isChecked():
-            mul = 1
-            if self._menus['mol']['nm']['revert'].isChecked():
-                mul = -1
-            self._actors['nm'] = cubetk.draw_nm3d(self._fchk.crd,
-                                                  self._fchk.get_evec(self._activest)*mul,
-                                                  self._fchk.atnum)
+            # Apply configuration settings
+            phase_mult = -1 if self._default['nmconfig']['invert_phase'] else 1
+            scale = self._default['nmconfig']['scale_factor']
+            color = self._default['nmconfig']['color']
+            
+            self._actors['nm'] = cubetk.draw_nm3d(
+                self._fchk.crd,
+                self._fchk.get_evec(self._activest) * phase_mult,
+                self._fchk.atnum,
+                scale=scale,
+                color=color
+            )
             self.ren.AddActor(self._actors['nm'].actor)
         self._updatereder()
 
@@ -1208,6 +1279,40 @@ class TCDvis(QMainWindow):
                 self.ren.RemoveActor(self._actors[key].actor)
                 del self._actors[key]
         self._updatereder()
+
+    def open_scene(self):
+        fname = QFileDialog.getOpenFileName(self, 'Select VTK Scene file',
+                                            '.','*.json')[0]
+        jsonfile = os.path.basename(fname)
+        try:
+            scene = read_json(fname)
+            camera = self.ren.GetActiveCamera()
+            camera.SetPosition(scene['Camera:Position'])
+            camera.SetFocalPoint(scene['Camera:FocalPoint'])
+            camera.SetViewUp(scene['Camera:ViewUp'])
+            camera.SetViewAngle(scene['Camera:ViewAngle'])
+            camera.SetClippingRange(scene['Camera:ClippingRange'])
+            self.iren.Start()
+            self._default = scene['Used parameters']
+            # print("NYI")
+        except FileNotFoundError as err:
+            print(err)
+        except KeyError:
+            print(f"{jsonfile} not a VTK scene")
+        
+    def save_scene(self):
+        jsondialog = SaveSceneDialog()
+        jsondialog.exec()
+        fname = jsondialog._fname
+        camera = self.ren.GetActiveCamera()
+        res = {}
+        res['Camera:FocalPoint'] = camera.GetFocalPoint()
+        res['Camera:Position'] = camera.GetPosition()
+        res['Camera:ViewUp'] = camera.GetViewUp()
+        res['Camera:ViewAngle'] = camera.GetViewAngle()
+        res['Camera:ClippingRange'] = camera.GetClippingRange()
+        res['Used parameters'] = self._default
+        write_json(res, fname)
 
 
 def main():

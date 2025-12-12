@@ -861,7 +861,7 @@ class VtcdData(VecCubeData):
     def mu_integrate(self, mask=None):
         """integrate vector field in all space"""
         # TODO prefactor
-        integrated = self.integrate(mask=mask) * -1 * 2 # Vedi franco?
+        integrated = self.integrate(mask=mask) * -1 
         return integrated
 
     def mag_integrate(self, mask=None, origin=None):
@@ -871,7 +871,7 @@ class VtcdData(VecCubeData):
         res = self._calc_rot(mask, origin=origin)
         # m = -ie/2c sum(cross(r,J))
         # integrated = res.sum(axis=1) * poligon / (2 * 137) * -1
-        integrated = res.sum(axis=1) * poligon * -1
+        integrated = res.sum(axis=1) * poligon * -1/4 #
         return integrated
 
     def mag_integrate_test(self, mask=None):
@@ -1120,7 +1120,7 @@ class AimCubeData(VecCubeData):
         """
         if hasattr(self, 'evec') and hasattr(self, 'energy'):
             # This is VTCD data, use specialized integration
-            integrated = self.integrate(mask=mask) * -1 * 2  # Vedi franco?
+            integrated = self.integrate(mask=mask) * -1 
             return integrated
         else:
             # Regular vector field integration
@@ -1135,7 +1135,7 @@ class AimCubeData(VecCubeData):
             # This is VTCD data, use specialized integration
             poligon = self.get_voxvol()
             res = self._calc_rot(mask, origin=origin)
-            integrated = res.sum(axis=1) * poligon * -1
+            integrated = res.sum(axis=1) * poligon * -1 * 1/4
             return integrated
         else:
             # Regular rotational integration

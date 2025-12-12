@@ -1,10 +1,10 @@
 import os
 import typing as tp
-from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout
+from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QGridLayout
 from PySide6.QtCore import QRegularExpression, QLocale
 from PySide6.QtGui import QRegularExpressionValidator, QIntValidator, QDoubleValidator
 from PySide6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QCheckBox, QComboBox
-from PySide6.QtWidgets import QLineEdit, QFileDialog, QGridLayout, QPushButton
+from PySide6.QtWidgets import QLineEdit, QFileDialog, QPushButton, QMessageBox, QColorDialog
 from tcdlibx.utils.var_tools import fuzzy_equal
 
 class SavePngDialog(QDialog):
@@ -12,29 +12,49 @@ class SavePngDialog(QDialog):
         super().__init__(parent)
         self._fname = fname
         self._okexit = False
-        nameLabel = QLabel('png name:', self)
+        self._dpi = 150  # Default DPI
+        self._folder = os.path.dirname(fname) if os.path.dirname(fname) else "."
+        
+        # PNG name input
+        nameLabel = QLabel('PNG name:', self)
         self.pngname = QLineEdit(self)
         png_valid = QRegularExpressionValidator()
-        # regexp = QRegularExpression()
-        # FIXME improve the regexp
         pattern = r'.*\.png'
         regexp = QRegularExpression(pattern)
         png_valid.setRegularExpression(regexp)
-        # png_valid.setLocale(QLocale('English'))
         self.pngname.setValidator(png_valid)
-        self.pngname.setText(self._fname)
+        self.pngname.setText(os.path.basename(self._fname))
         self.pngname.textEdited.connect(self._setcheck)
+
+        # DPI input
+        dpiLabel = QLabel('DPI:', self)
+        self.dpiInput = QLineEdit(self)
+        dpi_validator = QIntValidator(50, 1200, self)  # DPI range 50-1200
+        self.dpiInput.setValidator(dpi_validator)
+        self.dpiInput.setText(str(self._dpi))
+        self.dpiInput.textEdited.connect(self._update_dpi)
+        
+        # Folder selection
+        folderLabel = QLabel('Save in:', self)
+        self.folderPath = QLineEdit(self)
+        self.folderPath.setText(self._folder)
+        self.folderPath.setReadOnly(True)
+        self.browseButton = QPushButton('Browse...', self)
+        self.browseButton.clicked.connect(self._browse_folder)
 
         self.setWindowTitle("Save PNG file")
 
-        # widget =  QWidget(self)
-        # self.setCentralWidget(widget)
-        self.hlay = QHBoxLayout()
-        self.hlay.addWidget(nameLabel)
-        self.hlay.addWidget(self.pngname)
+        # Layout setup
+        self.grid_layout = QGridLayout()
+        self.grid_layout.addWidget(nameLabel, 0, 0)
+        self.grid_layout.addWidget(self.pngname, 0, 1, 1, 2)
+        self.grid_layout.addWidget(dpiLabel, 1, 0)
+        self.grid_layout.addWidget(self.dpiInput, 1, 1, 1, 2)
+        self.grid_layout.addWidget(folderLabel, 2, 0)
+        self.grid_layout.addWidget(self.folderPath, 2, 1)
+        self.grid_layout.addWidget(self.browseButton, 2, 2)
 
         QBtn = QDialogButtonBox.Ok | QDialogButtonBox.Cancel
-
         self.buttonBox = QDialogButtonBox(QBtn)
         self.okbtn = self.buttonBox.button(QDialogButtonBox.Ok)
 
@@ -42,14 +62,28 @@ class SavePngDialog(QDialog):
         self.accepted.connect(self._getpng)
         self.buttonBox.rejected.connect(self.reject)
 
-        # self.vlay.addWidget(message)
         self.vlay = QVBoxLayout()
-        self.vlay.addLayout(self.hlay)
+        self.vlay.addLayout(self.grid_layout)
         self.vlay.addWidget(self.buttonBox)
         self.setLayout(self.vlay)
 
     def _getpng(self):
-        self._fname = self.pngname.text()
+        self._fname = os.path.join(self._folder, self.pngname.text())
+        self._dpi = int(self.dpiInput.text()) if self.dpiInput.text() else 150
+        
+        # Check if file already exists
+        if os.path.exists(self._fname):
+            reply = QMessageBox.question(
+                self,
+                'File Exists',
+                f'The file "{os.path.basename(self._fname)}" already exists.\n\nDo you want to overwrite it?',
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if reply == QMessageBox.No:
+                self._okexit = False
+                return
+        
         self._okexit = True
 
     def _setcheck(self):
@@ -57,7 +91,18 @@ class SavePngDialog(QDialog):
             self.okbtn.setEnabled(True)
         else:
             self.okbtn.setEnabled(False)
-            #self.buttonBox.
+    
+    def _update_dpi(self):
+        try:
+            self._dpi = int(self.dpiInput.text())
+        except ValueError:
+            self._dpi = 150
+    
+    def _browse_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, "Select Save Directory", self._folder)
+        if folder:
+            self._folder = folder
+            self.folderPath.setText(folder)
 
 
 class SavePngSeriesDialog(QDialog):
@@ -111,6 +156,169 @@ class SavePngSeriesDialog(QDialog):
         else:
             self.okbtn.setEnabled(False)
             #self.buttonBox.
+
+class SaveSceneDialog(QDialog):
+    def __init__(self, parent=None, fname="vtkscene.json"):
+        super().__init__(parent)
+        self._fname = fname
+        self._okexit = False
+        self._folder = os.path.dirname(fname) if os.path.dirname(fname) else "."
+        
+        # JSON name input
+        nameLabel = QLabel('Scene JSON name:', self)
+        self.jsoname = QLineEdit(self)
+        json_valid = QRegularExpressionValidator()
+        # regexp = QRegularExpression()
+        # FIXME improve the regexp
+        pattern = r'.*\.json'
+        regexp = QRegularExpression(pattern)
+        json_valid.setRegularExpression(regexp)
+        self.jsoname.setValidator(json_valid)
+        self.jsoname.setText(os.path.basename(self._fname))
+        self.jsoname.textEdited.connect(self._setcheck)
+        
+        # Folder selection
+        folderLabel = QLabel('Save in:', self)
+        self.folderPath = QLineEdit(self)
+        self.folderPath.setText(self._folder)
+        self.folderPath.setReadOnly(True)
+        self.browseButton = QPushButton('Browse...', self)
+        self.browseButton.clicked.connect(self._browse_folder)
+
+        self.setWindowTitle("Save JSON Scene file")
+
+        # Layout setup
+        self.grid_layout = QGridLayout()
+        self.grid_layout.addWidget(nameLabel, 0, 0)
+        self.grid_layout.addWidget(self.jsoname, 0, 1, 1, 2)
+        self.grid_layout.addWidget(folderLabel, 1, 0)
+        self.grid_layout.addWidget(self.folderPath, 1, 1)
+        self.grid_layout.addWidget(self.browseButton, 1, 2)
+
+        QBtn = QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+
+        self.buttonBox = QDialogButtonBox(QBtn)
+        self.okbtn = self.buttonBox.button(QDialogButtonBox.Ok)
+
+        self.buttonBox.accepted.connect(self.accept)
+        self.accepted.connect(self._getjson)
+        self.buttonBox.rejected.connect(self.reject)
+
+        # self.vlay.addWidget(message)
+        self.vlay = QVBoxLayout()
+        self.vlay.addLayout(self.grid_layout)
+        self.vlay.addWidget(self.buttonBox)
+        self.setLayout(self.vlay)
+
+    def _getjson(self):
+        self._fname = os.path.join(self._folder, self.jsoname.text())
+        
+        # Check if file already exists
+        if os.path.exists(self._fname):
+            reply = QMessageBox.question(
+                self,
+                'File Exists',
+                f'The file "{os.path.basename(self._fname)}" already exists.\n\nDo you want to overwrite it?',
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if reply == QMessageBox.No:
+                self._okexit = False
+                return
+        
+        self._okexit = True
+
+    def _setcheck(self):
+        if self.jsoname.hasAcceptableInput():
+            self.okbtn.setEnabled(True)
+        else:
+            self.okbtn.setEnabled(False)
+    
+    def _browse_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, "Select Save Directory", self._folder)
+        if folder:
+            self._folder = folder
+            self.folderPath.setText(folder)
+
+
+class NMConfigDialog(QDialog):
+    def __init__(self, parent=None, invert_phase=False, scale_factor=1.0, color=(1.0, 0.0, 0.0)):
+        super().__init__(parent)
+        
+        self._invert_phase = invert_phase
+        self._scale_factor = scale_factor
+        self._color = color
+        self._okexit = False
+        
+        self.setWindowTitle("Normal Mode Configuration")
+        
+        # Phase inversion checkbox
+        self.phaseInvert = QCheckBox('Invert Phase', self)
+        self.phaseInvert.setChecked(self._invert_phase)
+        
+        # Scale factor input
+        scaleLabel = QLabel('Scale Factor:', self)
+        self.scaleInput = QLineEdit(self)
+        scale_validator = QDoubleValidator(0.1, 10.0, 2, self)  # Range 0.1-10.0, 2 decimals
+        self.scaleInput.setValidator(scale_validator)
+        self.scaleInput.setText(str(self._scale_factor))
+        
+        # Color selection
+        colorLabel = QLabel('Vector Color:', self)
+        self.colorButton = QPushButton('Select Color', self)
+        self.colorButton.clicked.connect(self._select_color)
+        self._update_color_button()
+        
+        # Layout setup
+        self.grid_layout = QGridLayout()
+        self.grid_layout.addWidget(self.phaseInvert, 0, 0, 1, 2)
+        self.grid_layout.addWidget(scaleLabel, 1, 0)
+        self.grid_layout.addWidget(self.scaleInput, 1, 1)
+        self.grid_layout.addWidget(colorLabel, 2, 0)
+        self.grid_layout.addWidget(self.colorButton, 2, 1)
+        
+        # Dialog buttons
+        QBtn = QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        self.buttonBox = QDialogButtonBox(QBtn)
+        
+        self.buttonBox.accepted.connect(self.accept)
+        self.accepted.connect(self._get_config)
+        self.buttonBox.rejected.connect(self.reject)
+        
+        # Main layout
+        self.vlay = QVBoxLayout()
+        self.vlay.addLayout(self.grid_layout)
+        self.vlay.addWidget(self.buttonBox)
+        self.setLayout(self.vlay)
+    
+    def _select_color(self):
+        """Open color dialog to select vector color"""
+        # Convert RGB float tuple to QColor
+        from PySide6.QtGui import QColor
+        current_color = QColor()
+        current_color.setRgbF(self._color[0], self._color[1], self._color[2])
+        
+        color = QColorDialog.getColor(current_color, self, "Select Vector Color")
+        if color.isValid():
+            new_color = (color.redF(), color.greenF(), color.blueF())
+            self._color = new_color
+            self._update_color_button()
+    
+    def _update_color_button(self):
+        """Update the color button to show the selected color"""
+        r, g, b = [int(c * 255) for c in self._color]
+        self.colorButton.setStyleSheet(f"background-color: rgb({r}, {g}, {b}); color: white;")
+    
+    def _get_config(self):
+        """Get configuration values when OK is pressed"""
+        self._invert_phase = self.phaseInvert.isChecked()
+        try:
+            self._scale_factor = float(self.scaleInput.text())
+        except ValueError:
+            self._scale_factor = 1.0
+        # Note: _color is already updated in _select_color method when user changes color
+        self._okexit = True
+
 
 class TCDDialog(QDialog):
     def __init__(self, parent=None, maxval=1, texts: tp.List[str] = ["VTCD", "NM"]):

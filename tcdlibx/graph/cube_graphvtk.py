@@ -321,7 +321,7 @@ def draw_nm3d(crd, evec, ian,
         cngsign (bool, optional): _description_. Defaults to True.
         chgwght (bool, optional): _description_. Defaults to True.
         scale (int, optional): _description_. Defaults to 1.
-        color (str, optional): _description_. Defaults to "blue".
+        color (str or tuple, optional): Color name (str) or RGB tuple (0.0-1.0). Defaults to "blue".
 
     Returns:
         _type_: _description_
@@ -379,10 +379,18 @@ def draw_nm3d(crd, evec, ian,
     glyphs.SetScaleModeToScaleByVector()
     # Scale factor
     glyphs.SetScaleFactor(scale)
+    # Turn off scalar visibility on mapper to use uniform color
+    glyph_mapper.ScalarVisibilityOff()
     clrs = vtk.vtkNamedColors()
-    glyphs.SetColorModeToColorByScalar()
-    glyph_actor.GetProperty().SetColor(clrs.GetColor3d(color))
-
+    
+    # Handle color parameter - accept both string names and RGB tuples
+    if isinstance(color, (tuple, list)):
+        # RGB tuple/list (values 0.0-1.0)
+        glyph_actor.GetProperty().SetColor(color[0], color[1], color[2])
+    else:
+        # String color name
+        glyph_actor.GetProperty().SetColor(clrs.GetColor3d(color))
+    
     return MyvtkActor(glyph_actor, glyphs)
 
 def draw_vectors(crd, vecs, tps, scale=1):
