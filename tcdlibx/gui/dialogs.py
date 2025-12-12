@@ -1,10 +1,10 @@
 import os
 import typing as tp
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QGridLayout
-from PySide6.QtCore import QRegularExpression, QLocale
+from PySide6.QtCore import QRegularExpression, QLocale, Qt
 from PySide6.QtGui import QRegularExpressionValidator, QIntValidator, QDoubleValidator
 from PySide6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QCheckBox, QComboBox
-from PySide6.QtWidgets import QLineEdit, QFileDialog, QPushButton, QMessageBox, QColorDialog
+from PySide6.QtWidgets import QLineEdit, QFileDialog, QPushButton, QMessageBox, QColorDialog, QSlider
 from tcdlibx.utils.var_tools import fuzzy_equal
 
 class SavePngDialog(QDialog):
@@ -599,6 +599,168 @@ class QuiverSetupDialog(QDialog):
     def _setvals(self):
         self._scale = self._scalemol._getvalue()
         self._subsamp = self._subsampline._getvalue()
+
+
+class MoleculeConfigDialog(QDialog):
+    def __init__(self, parent=None, wireframe=False, opacity=1.0, bond_radius=0.03, atom_radius_scale=0.03, tubes_mode=False):
+        super().__init__(parent)
+        
+        self._wireframe = wireframe
+        self._opacity = opacity
+        self._bond_radius = bond_radius
+        self._atom_radius_scale = atom_radius_scale
+        self._tubes_mode = tubes_mode
+        self._okexit = False
+        
+        self.setWindowTitle("Molecule Display Settings")
+        
+        # Tubes mode checkbox (replaces wireframe checkbox)
+        self.tubesCheck = QCheckBox('Tubes Mode (atoms = bond size)', self)
+        self.tubesCheck.setChecked(self._tubes_mode)
+        self.tubesCheck.stateChanged.connect(self._toggle_tubes_mode)
+        
+        # Opacity slider and input
+        opacityLabel = QLabel('Opacity:', self)
+        self.opacitySlider = QSlider(Qt.Horizontal, self)
+        self.opacitySlider.setRange(1, 100)  # 1-100 for 0.01-1.0
+        self.opacitySlider.setValue(int(self._opacity * 100))
+        self.opacitySlider.valueChanged.connect(self._update_opacity_input)
+        
+        self.opacityInput = QLineEdit(self)
+        opacity_validator = QDoubleValidator()
+        opacity_validator.setLocale(QLocale.c())
+        opacity_validator.setRange(0.01, 1.0, 2)
+        self.opacityInput.setValidator(opacity_validator)
+        self.opacityInput.setText(str(self._opacity))
+        self.opacityInput.editingFinished.connect(self._update_opacity_slider)
+        
+        # Bond radius input
+        bondRadiusLabel = QLabel('Bond Radius:', self)
+        self.bondRadiusInput = QLineEdit(self)
+        bond_validator = QDoubleValidator()
+        bond_validator.setLocale(QLocale.c())
+        bond_validator.setRange(0.001, 3.0, 3)
+        self.bondRadiusInput.setValidator(bond_validator)
+        self.bondRadiusInput.setText(str(self._bond_radius))
+        self.bondRadiusInput.textChanged.connect(self._sync_tubes_mode)
+        
+        # Atom radius scale input
+        atomRadiusLabel = QLabel('Atom Radius Scale:', self)
+        self.atomRadiusInput = QLineEdit(self)
+        atom_validator = QDoubleValidator()
+        atom_validator.setLocale(QLocale.c())
+        atom_validator.setRange(0.001, 3.0, 3)
+        self.atomRadiusInput.setValidator(atom_validator)
+        self.atomRadiusInput.setText(str(self._atom_radius_scale))
+        
+        # Wireframe preset button
+        self.wireframeButton = QPushButton('Wireframe Preset (0.01)', self)
+        self.wireframeButton.clicked.connect(self._apply_wireframe_preset)
+        
+        # Store controls that should be disabled in tubes mode
+        self.atom_controls = [atomRadiusLabel, self.atomRadiusInput]
+        
+        # Layout setup
+        self.grid_layout = QGridLayout()
+        self.grid_layout.addWidget(self.tubesCheck, 0, 0, 1, 2)
+        self.grid_layout.addWidget(opacityLabel, 1, 0)
+        opacity_layout = QHBoxLayout()
+        opacity_layout.addWidget(self.opacitySlider)
+        opacity_layout.addWidget(self.opacityInput)
+        self.grid_layout.addLayout(opacity_layout, 1, 1)
+        
+        self.grid_layout.addWidget(bondRadiusLabel, 2, 0)
+        self.grid_layout.addWidget(self.bondRadiusInput, 2, 1)
+        self.grid_layout.addWidget(atomRadiusLabel, 3, 0)
+        self.grid_layout.addWidget(self.atomRadiusInput, 3, 1)
+        self.grid_layout.addWidget(self.wireframeButton, 4, 0, 1, 2)
+        
+        # Dialog buttons
+        QBtn = QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        self.buttonBox = QDialogButtonBox(QBtn)
+        
+        self.buttonBox.accepted.connect(self.accept)
+        self.accepted.connect(self._get_config)
+        self.buttonBox.rejected.connect(self.reject)
+        
+        # Main layout
+        self.vlay = QVBoxLayout()
+        self.vlay.addLayout(self.grid_layout)
+        self.vlay.addWidget(self.buttonBox)
+        self.setLayout(self.vlay)
+        
+        # Initialize tubes mode state
+        self._toggle_tubes_mode()
+    
+    def _toggle_tubes_mode(self):
+        """Enable/disable atom controls based on tubes checkbox and sync values"""
+        tubes_enabled = self.tubesCheck.isChecked()
+        self._tubes_mode = tubes_enabled
+        
+        # Enable/disable atom controls
+        for control in self.atom_controls:
+            control.setEnabled(not tubes_enabled)
+        
+        # If tubes mode is enabled, sync atom radius with bond radius
+        if tubes_enabled:
+            self._sync_tubes_mode()
+    
+    def _sync_tubes_mode(self):
+        """Sync atom radius with bond radius when in tubes mode"""
+        if self._tubes_mode and self.tubesCheck.isChecked():
+            bond_radius_text = self.bondRadiusInput.text()
+            # Only sync if there's valid text and it's not empty
+            if bond_radius_text and bond_radius_text.strip():
+                try:
+                    # Validate that it's a valid number
+                    float(bond_radius_text)
+                    self.atomRadiusInput.setText(bond_radius_text)
+                except ValueError:
+                    # If invalid number, don't update atom radius
+                    pass
+    
+    def _apply_wireframe_preset(self):
+        """Apply wireframe preset values (0.01 for both bond and atom)"""
+        self.bondRadiusInput.setText("0.01")
+        self.atomRadiusInput.setText("0.01")
+        # If tubes mode is on, keep them synced
+        if self.tubesCheck.isChecked():
+            self._sync_tubes_mode()
+    
+    def _update_opacity_input(self):
+        """Update opacity input when slider changes"""
+        value = self.opacitySlider.value() / 100.0
+        self.opacityInput.setText(f"{value:.2f}")
+    
+    def _update_opacity_slider(self):
+        """Update opacity slider when input changes"""
+        try:
+            value = float(self.opacityInput.text())
+            self.opacitySlider.setValue(int(value * 100))
+        except ValueError:
+            pass
+    
+    def _get_config(self):
+        """Get configuration values when OK is pressed"""
+        self._wireframe = False  # No longer used, keeping for compatibility
+        self._tubes_mode = self.tubesCheck.isChecked()
+        
+        try:
+            self._opacity = float(self.opacityInput.text())
+        except ValueError:
+            self._opacity = 1.0
+        
+        try:
+            self._bond_radius = float(self.bondRadiusInput.text())
+        except ValueError:
+            self._bond_radius = 0.03
+            
+        try:
+            self._atom_radius_scale = float(self.atomRadiusInput.text())
+        except ValueError:
+            self._atom_radius_scale = 0.03
+            
+        self._okexit = True
 
 
 class StreamLineSetupDialog(QDialog):

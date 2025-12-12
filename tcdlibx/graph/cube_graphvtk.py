@@ -188,34 +188,47 @@ def fillcubeimage(data, vec=True, logscale=False, aslist=False):
     return cubeimage
 
 def fillmolecule(atm, crd, wireframe=False,
-                 opacity=1):
+                 opacity=1, bond_radius=None, atom_radius_scale=None, tubes_mode=False):
     """
+    Create a VTK molecule visualization.
 
     Args:
-        moldata (_type_): _description_
+        atm: List of atomic numbers
+        crd: Coordinates array
+        wireframe (bool): If True, show wireframe/stick representation (legacy parameter)
+        opacity (float): Molecule opacity (0.0-1.0)
+        bond_radius (float): Custom bond radius
+        atom_radius_scale (float): Custom atomic radius scale factor
+        tubes_mode (bool): If True, atoms use same radius as bonds
     """
     mol = vtk.vtkMolecule()
     atoms = []
     for i in range(len(atm)):
-        atoms.append(mol.AppendAtom(atm[i],
-                                    *crd[i]))
-    # try:
-    #     bond = vtk.vtkPSimpleBondPerceiver()
-    # except AttributeError:
-    bond = vtk.vtkSimpleBondPerceiver()
-    bond.SetInputData(mol)
-    bond.Update()
-    molout = bond.GetOutput()
-    # Create a mapper
-    # mapper = vtk.vtkPolyDataMapper()
+        atoms.append(mol.AppendAtom(atm[i], *crd[i]))
+    
+    # Use VTK bond perceiver
+    bond_perceiver = vtk.vtkSimpleBondPerceiver()
+    bond_perceiver.SetInputData(mol)
+    bond_perceiver.SetTolerance(.8)
+    bond_perceiver.Update()
+    molout = bond_perceiver.GetOutput()
+    
     mapper = vtk.vtkMoleculeMapper()
     mapper.UseLiquoriceStickSettings()
-    if wireframe:
-        mapper.SetAtomicRadiusScaleFactor(0.03)
-        mapper.SetBondRadius(0.03)
-    # mapper.SetInputConnection(source.GetOutputPort())
+    
+    # Apply bond radius if provided
+    if bond_radius is not None:
+        mapper.SetBondRadius(bond_radius)
+    
+    # Apply atom radius scale
+    if tubes_mode and bond_radius is not None:
+        # In tubes mode, atoms use the same size as bonds
+        mapper.SetAtomicRadiusScaleFactor(bond_radius)
+    elif atom_radius_scale is not None:
+        # Normal mode - use the specified atom radius scale
+        mapper.SetAtomicRadiusScaleFactor(atom_radius_scale)
+    
     mapper.SetInputData(molout)
-    # Create an actor
     actor = vtk.vtkActor()
     actor.SetMapper(mapper)
     actor.GetProperty().SetOpacity(opacity)

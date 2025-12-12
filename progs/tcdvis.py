@@ -27,7 +27,7 @@ from tcdlibx.calc.cube_manip import VecCubeData, VtcdData, cube_parser
 from tcdlibx.graph.helpers import EleMolecule, VibMolecule, filtervecatom
 import tcdlibx.graph.cube_graphvtk as cubetk
 from tcdlibx.gui.dialogs import (
-    SavePngDialog, SavePngSeriesDialog, StreamLineSetupDialog, TCDDialog, QuiverSetupDialog, SaveSceneDialog, NMConfigDialog
+    SavePngDialog, SavePngSeriesDialog, StreamLineSetupDialog, TCDDialog, QuiverSetupDialog, SaveSceneDialog, NMConfigDialog, MoleculeConfigDialog
 )
 from tcdlibx.io.estp_io import PHYSFACT, get_elemol, get_vibmol
 from tcdlibx.io.jsonio import read_json, write_json
@@ -103,7 +103,12 @@ class TCDvis(QMainWindow):
                                    'subsample': 5},
                          'nmconfig': {'invert_phase': False,
                                      'scale_factor': 1.0,
-                                     'color': (0.0, 0.0, 1.0)},}
+                                     'color': (0.0, 0.0, 1.0)},
+                         'molconfig': {'wireframe': False,
+                                      'opacity': 1.0,
+                                      'bond_radius': 0.03,
+                                      'atom_radius_scale': 0.1,
+                                      'tubes_mode': False},}
 
         self.initUI()
 
@@ -176,6 +181,14 @@ class TCDvis(QMainWindow):
         transparentButton.setEnabled(False)
         self._menus['mol']['transparent'] = transparentButton
         fileMol.addAction(transparentButton)
+        
+        # Molecule settings
+        molSettingsButton = QAction(QIcon(''), 'Settings', self)
+        molSettingsButton.setStatusTip('Configure molecule display settings (wireframe, opacity, radii)')
+        molSettingsButton.triggered.connect(self.configure_molecule)
+        molSettingsButton.setEnabled(False)
+        self._menus['mol']['settings'] = molSettingsButton
+        fileMol.addAction(molSettingsButton)
         
         # NM buttons
         nmmenu = fileMol.addMenu('NM')
@@ -301,7 +314,7 @@ class TCDvis(QMainWindow):
         self._menus['vtcd']['aim'] = aimButton
         filevtcd.addAction(aimButton)
         saimButton = QAction(QIcon(''), 'Show AIM Frag Space', self)
-        saimButton.setStatusTip('Shows the volume of each fragmente in AIM partition scheme')
+        saimButton.setStatusTip('Shows the volume of each fragment in AIM partition scheme')
         saimButton.triggered.connect(self.show_aim_space)
         saimButton.setEnabled(False)
         saimButton.setCheckable(True)
@@ -402,8 +415,15 @@ class TCDvis(QMainWindow):
 
         if self._fchk is not None:
             self._enable_molmenu()
-            self._actors['mol'] =  cubetk.fillmolecule(self._fchk.atnum,
-                                                       self._fchk.crd)
+            self._actors['mol'] =  cubetk.fillmolecule(
+                self._fchk.atnum,
+                self._fchk.crd,
+                wireframe=self._default['molconfig']['wireframe'],
+                opacity=self._default['molconfig']['opacity'],
+                bond_radius=self._default['molconfig']['bond_radius'],
+                atom_radius_scale=self._default['molconfig']['atom_radius_scale'],
+                tubes_mode=self._default['molconfig']['tubes_mode']
+            )
             self.ren.AddActor(self._actors['mol'].actor)
             self._updatenst()
             self.stline.setEnabled(True)
@@ -783,8 +803,15 @@ class TCDvis(QMainWindow):
         #     self._actors[key] = None
         self._updatenst()
         # update validator
-        self._actors['mol'] =  cubetk.fillmolecule(self._fchk.atnum,
-                                                       self._fchk.crd)
+        self._actors['mol'] =  cubetk.fillmolecule(
+            self._fchk.atnum,
+            self._fchk.crd,
+            wireframe=self._default['molconfig']['wireframe'],
+            opacity=self._default['molconfig']['opacity'],
+            bond_radius=self._default['molconfig']['bond_radius'],
+            atom_radius_scale=self._default['molconfig']['atom_radius_scale'],
+            tubes_mode=self._default['molconfig']['tubes_mode']
+        )
         self.ren.AddActor(self._actors['mol'].actor)
         self._disable_molmenu()
         self._enable_molmenu()
@@ -1201,6 +1228,51 @@ class TCDvis(QMainWindow):
             # Refresh display if NM is currently shown
             if self._menus['mol']['nm']['disp'].isChecked():
                 self.shownm()
+
+    def configure_molecule(self):
+        """Open dialog to configure molecule display settings"""
+        config_dialog = MoleculeConfigDialog(
+            parent=self,
+            wireframe=self._default['molconfig']['wireframe'],
+            opacity=self._default['molconfig']['opacity'],
+            bond_radius=self._default['molconfig']['bond_radius'],
+            atom_radius_scale=self._default['molconfig']['atom_radius_scale'],
+            tubes_mode=self._default['molconfig']['tubes_mode']
+        )
+        
+        config_dialog.exec()
+        
+        if config_dialog._okexit:
+            # Update configuration
+            self._default['molconfig']['wireframe'] = config_dialog._wireframe
+            self._default['molconfig']['opacity'] = config_dialog._opacity
+            self._default['molconfig']['bond_radius'] = config_dialog._bond_radius
+            self._default['molconfig']['atom_radius_scale'] = config_dialog._atom_radius_scale
+            self._default['molconfig']['tubes_mode'] = config_dialog._tubes_mode
+            
+            # Refresh molecule display
+            self._refresh_molecule_display()
+
+    def _refresh_molecule_display(self):
+        """Refresh the molecule display with current settings"""
+        if 'mol' in self._actors:
+            # Remove current molecule
+            self.ren.RemoveActor(self._actors['mol'].actor)
+            
+            # Create new molecule with updated settings
+            self._actors['mol'] = cubetk.fillmolecule(
+                self._fchk.atnum,
+                self._fchk.crd,
+                wireframe=self._default['molconfig']['wireframe'],
+                opacity=self._default['molconfig']['opacity'],
+                bond_radius=self._default['molconfig']['bond_radius'],
+                atom_radius_scale=self._default['molconfig']['atom_radius_scale'],
+                tubes_mode=self._default['molconfig']['tubes_mode']
+            )
+            
+            # Add updated molecule to renderer
+            self.ren.AddActor(self._actors['mol'].actor)
+            self._updatereder()
 
     def shownm(self):
         if 'nm' in self._actors:
