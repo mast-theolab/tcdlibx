@@ -6,7 +6,7 @@ Genenarl function to operate with vectors and matrices
 import os
 import typing as tp
 import numpy as np
-from .types import Array3F
+# from .types import Array3F
 from .custom_except import NoValidData, NoValidArg
 from .mol_data import AT_RVDW
 

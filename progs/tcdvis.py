@@ -96,7 +96,7 @@ class TCDvis(QMainWindow):
                                     'scalevdw': 2.0,
                                     'sampling_method': 'ellipsoid',
                                     'showdir': False,
-                                    'showell': False,
+                                    'showseeds': False,
                                     'conescale': .1,
                                     'showbar': False,
                                     'animate_particles': False,
@@ -657,7 +657,7 @@ class TCDvis(QMainWindow):
                                              nseeds=self._default["vfield"]["npoints"],
                                              scale=self._default["vfield"]["scalellipse"],
                                              direction=self._default["vfield"]["showdir"],
-                                             showellipse=self._default["vfield"]["showell"],
+                                             showellipse=self._default["vfield"]["showseeds"],
                                              showbar=self._default["vfield"]["showbar"],
                                              animate_particles=self._default["vfield"]["animate_particles"],
                                              num_particles=self._default["vfield"]["num_particles"],
@@ -681,7 +681,7 @@ class TCDvis(QMainWindow):
             self._default["vfield"]["sampling_method"] = fieldprm._sampling_method
             self._default["vfield"]["npoints"] = fieldprm._nseeds
             self._default["vfield"]["showdir"] = fieldprm._direction
-            self._default["vfield"]["showell"] = fieldprm._showellipse
+            self._default["vfield"]["showseeds"] = fieldprm._showellipse
             self._default["vfield"]["showbar"] = fieldprm._showbar
             self._default["vfield"]["animate_particles"] = fieldprm._animate_particles
             self._default["vfield"]["num_particles"] = fieldprm._num_particles
@@ -748,11 +748,12 @@ class TCDvis(QMainWindow):
                     else:  # molecular volume
                         current_tcd = self._fchk.get_tcd(self._activest)
                         self._seeds = sample_molecular_volume(current_tcd, self._default["vfield"]["npoints"], scale=self._default["vfield"]["scalevdw"])
-                self._actors['ellipse'] = cubetk.draw_ellipsoid(self._seeds)
-                self.ren.AddActor(self._actors['ellipse'].actor)
-            elif 'ellipse' in self._actors:
-                self.ren.RemoveActor(self._actors['ellipse'].actor)
-                del self._actors['ellipse']
+                # Always show the seeds regardless of sampling method
+                self._actors['seeds'] = cubetk.draw_ellipsoid(self._seeds)
+                self.ren.AddActor(self._actors['seeds'].actor)
+            elif 'seeds' in self._actors:
+                self.ren.RemoveActor(self._actors['seeds'].actor)
+                del self._actors['seeds']
                 
         elif current_prop == "quiver":
             # Handle quiver setup dialog
@@ -1146,6 +1147,10 @@ class TCDvis(QMainWindow):
             if self._default["vfield"]["showbar"]:
                 self._actors['tcdbar'] = cubetk.draw_colorbar(self._actors['tcd'].actor, "Norm(J)")
             if self._default["vfield"]["showdir"]:
+                # attempt to draw direction with cones.
+                # instead of using the seeds points, 
+                # we can show hedehogs with cone gliphs
+                # and a sparse sampling of the vector field
                 self._actors['tcddir'] = cubetk.draw_cones_nogrid(tmp_cube, self._seeds)
             
             # Add animated particles if enabled

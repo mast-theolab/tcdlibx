@@ -837,7 +837,7 @@ class StreamLineSetupDialog(QDialog):
         self._shdir = QCheckBox("Show direction")
         self._shdir.setChecked(direction)
         self._shdir.stateChanged.connect(self._setdir)
-        self._shell = QCheckBox("Show ellipsoids")
+        self._shell = QCheckBox("Show seeds")
         self._shell.setChecked(showellipse)
         self._shell.stateChanged.connect(self._setell)
         self._shbar = QCheckBox("Show ColorBar")
