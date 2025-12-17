@@ -111,7 +111,9 @@ class TCDvis(QMainWindow):
                                       'opacity': 1.0,
                                       'bond_radius': 0.03,
                                       'atom_radius_scale': 0.1,
-                                      'tubes_mode': False},}
+                                      'tubes_mode': False,
+                                      'bond_tollerance': 0.23,
+                                      'hide_auto_group': False},}
 
         self.initUI()
 
@@ -418,14 +420,23 @@ class TCDvis(QMainWindow):
 
         if self._fchk is not None:
             self._enable_molmenu()
-            self._actors['mol'] =  cubetk.fillmolecule(
+            # Determine excluded atoms if hide auto group is enabled
+            excluded_atoms = None
+            if (self._default['molconfig']['hide_auto_group'] and 
+                self._has_auto_fragment and 
+                self._fchk._frags is not None and 
+                len(self._fchk._frags) > 0):
+                excluded_atoms = self._fchk._frags[-1]  # Last fragment is auto-generated
+                
+            self._actors['mol'] =  cubetk.fillmolecule_custom(
                 self._fchk.atnum,
                 self._fchk.crd,
-                wireframe=self._default['molconfig']['wireframe'],
                 opacity=self._default['molconfig']['opacity'],
                 bond_radius=self._default['molconfig']['bond_radius'],
                 atom_radius_scale=self._default['molconfig']['atom_radius_scale'],
-                tubes_mode=self._default['molconfig']['tubes_mode']
+                tubes_mode=self._default['molconfig']['tubes_mode'],
+                bond_tollerance=self._default['molconfig']['bond_tollerance'],
+                excluded_atoms=excluded_atoms
             )
             self.ren.AddActor(self._actors['mol'].actor)
             self._updatenst()
@@ -671,11 +682,21 @@ class TCDvis(QMainWindow):
             self._default["vfield"]["mspeed"] = fieldprm._mspeed
             
             if fieldprm._recalseeds:
+                # Remove old seeds visualization if it exists
+                if 'seeds' in self._actors:
+                    self.ren.RemoveActor(self._actors['seeds'].actor)
+                    del self._actors['seeds']
+                    
                 if fieldprm._sampling_method == "ellipsoid":
                     self._seeds = self._fchk.sample_ellipse_space(npts=fieldprm._nseeds, scale=fieldprm._scale)
                 else:  # molecular volume
                     current_tcd = self._fchk.get_tcd(self._activest)
                     self._seeds = sample_molecular_volume(current_tcd, fieldprm._nseeds, scale=fieldprm._scalevdw)
+                    
+                # If show seeds is enabled, create new seeds visualization
+                if fieldprm._showellipse:
+                    self._actors['seeds'] = cubetk.draw_ellipsoid(self._seeds)
+                    self.ren.AddActor(self._actors['seeds'].actor)
             self._default["vfield"]["scalellipse"] = fieldprm._scale
             self._default["vfield"]["scalevdw"] = fieldprm._scalevdw
             self._default["vfield"]["sampling_method"] = fieldprm._sampling_method
@@ -742,12 +763,19 @@ class TCDvis(QMainWindow):
                         del self._actors['tcddir']
 
             if fieldprm._showellipse:
+                # Remove old seeds if they exist
+                if 'seeds' in self._actors:
+                    self.ren.RemoveActor(self._actors['seeds'].actor)
+                    del self._actors['seeds']
+                    
+                # Create seeds if they don't exist or weren't created during recalc
                 if self._seeds is None:
                     if self._default["vfield"]["sampling_method"] == "ellipsoid":
                         self._seeds = self._fchk.sample_ellipse_space(self._default["vfield"]["npoints"], scale=self._default["vfield"]["scalellipse"])
                     else:  # molecular volume
                         current_tcd = self._fchk.get_tcd(self._activest)
                         self._seeds = sample_molecular_volume(current_tcd, self._default["vfield"]["npoints"], scale=self._default["vfield"]["scalevdw"])
+                
                 # Always show the seeds regardless of sampling method
                 self._actors['seeds'] = cubetk.draw_ellipsoid(self._seeds)
                 self.ren.AddActor(self._actors['seeds'].actor)
@@ -819,14 +847,23 @@ class TCDvis(QMainWindow):
         #     self._actors[key] = None
         self._updatenst()
         # update validator
-        self._actors['mol'] =  cubetk.fillmolecule(
+        # Determine excluded atoms if hide auto group is enabled
+        excluded_atoms = None
+        if (self._default['molconfig']['hide_auto_group'] and 
+            self._has_auto_fragment and 
+            self._fchk._frags is not None and 
+            len(self._fchk._frags) > 0):
+            excluded_atoms = self._fchk._frags['indx'][-1]  # Last fragment is auto-generated
+            
+        self._actors['mol'] =  cubetk.fillmolecule_custom(
             self._fchk.atnum,
             self._fchk.crd,
-            wireframe=self._default['molconfig']['wireframe'],
             opacity=self._default['molconfig']['opacity'],
             bond_radius=self._default['molconfig']['bond_radius'],
             atom_radius_scale=self._default['molconfig']['atom_radius_scale'],
-            tubes_mode=self._default['molconfig']['tubes_mode']
+            tubes_mode=self._default['molconfig']['tubes_mode'],
+            bond_tollerance=self._default['molconfig']['bond_tollerance'],
+            excluded_atoms=excluded_atoms
         )
         self.ren.AddActor(self._actors['mol'].actor)
         self._disable_molmenu()
@@ -1261,7 +1298,10 @@ class TCDvis(QMainWindow):
             opacity=self._default['molconfig']['opacity'],
             bond_radius=self._default['molconfig']['bond_radius'],
             atom_radius_scale=self._default['molconfig']['atom_radius_scale'],
-            tubes_mode=self._default['molconfig']['tubes_mode']
+            tubes_mode=self._default['molconfig']['tubes_mode'],
+            bond_tollerance=self._default['molconfig']['bond_tollerance'],
+            hide_auto_group=self._default['molconfig']['hide_auto_group'],
+            has_auto_fragment=self._has_auto_fragment and self._fchk._frags is not None
         )
         
         config_dialog.exec()
@@ -1273,6 +1313,8 @@ class TCDvis(QMainWindow):
             self._default['molconfig']['bond_radius'] = config_dialog._bond_radius
             self._default['molconfig']['atom_radius_scale'] = config_dialog._atom_radius_scale
             self._default['molconfig']['tubes_mode'] = config_dialog._tubes_mode
+            self._default['molconfig']['bond_tollerance'] = config_dialog._bond_tollerance
+            self._default['molconfig']['hide_auto_group'] = config_dialog._hide_auto_group
             
             # Refresh molecule display
             self._refresh_molecule_display()
@@ -1283,15 +1325,24 @@ class TCDvis(QMainWindow):
             # Remove current molecule
             self.ren.RemoveActor(self._actors['mol'].actor)
             
+            # Determine excluded atoms if hide auto group is enabled
+            excluded_atoms = None
+            if (self._default['molconfig']['hide_auto_group'] and 
+                self._has_auto_fragment and 
+                self._fchk._frags is not None and 
+                len(self._fchk._frags) > 0):
+                excluded_atoms = self._fchk._frags['indx'][-1]  # Last fragment is auto-generated
+            
             # Create new molecule with updated settings
-            self._actors['mol'] = cubetk.fillmolecule(
+            self._actors['mol'] = cubetk.fillmolecule_custom(
                 self._fchk.atnum,
                 self._fchk.crd,
-                wireframe=self._default['molconfig']['wireframe'],
                 opacity=self._default['molconfig']['opacity'],
                 bond_radius=self._default['molconfig']['bond_radius'],
                 atom_radius_scale=self._default['molconfig']['atom_radius_scale'],
-                tubes_mode=self._default['molconfig']['tubes_mode']
+                tubes_mode=self._default['molconfig']['tubes_mode'],
+                bond_tollerance=self._default['molconfig']['bond_tollerance'],
+                excluded_atoms=excluded_atoms
             )
             
             # Add updated molecule to renderer

@@ -187,20 +187,22 @@ def fillcubeimage(data, vec=True, logscale=False, aslist=False):
     # print(norm.GetRange())
     return cubeimage
 
-def fillmolecule(atm, crd, wireframe=False,
-                 opacity=1, bond_radius=None, atom_radius_scale=None, tubes_mode=False):
+def fillmolecule(atm, crd, 
+                 opacity=1, bond_radius=None, atom_radius_scale=None,
+                 tubes_mode=False,
+                 bond_tollerance=0.23) -> MyvtkActor:
     """
     Create a VTK molecule visualization.
 
     Args:
         atm: List of atomic numbers
         crd: Coordinates array
-        wireframe (bool): If True, show wireframe/stick representation (legacy parameter)
         opacity (float): Molecule opacity (0.0-1.0)
         bond_radius (float): Custom bond radius
         atom_radius_scale (float): Custom atomic radius scale factor
         tubes_mode (bool): If True, atoms use same radius as bonds
     """
+    # TODO implement a true bond perceiver
     mol = vtk.vtkMolecule()
     atoms = []
     for i in range(len(atm)):
@@ -209,12 +211,13 @@ def fillmolecule(atm, crd, wireframe=False,
     # Use VTK bond perceiver
     bond_perceiver = vtk.vtkSimpleBondPerceiver()
     bond_perceiver.SetInputData(mol)
-    bond_perceiver.SetTolerance(.8)
+    bond_perceiver.SetTolerance(bond_tollerance)
     bond_perceiver.Update()
     molout = bond_perceiver.GetOutput()
     
     mapper = vtk.vtkMoleculeMapper()
     mapper.UseLiquoriceStickSettings()
+    # mapper.UseMultiCylindersForBondsOn()
     
     # Apply bond radius if provided
     if bond_radius is not None:
@@ -228,6 +231,68 @@ def fillmolecule(atm, crd, wireframe=False,
         # Normal mode - use the specified atom radius scale
         mapper.SetAtomicRadiusScaleFactor(atom_radius_scale)
     
+    mapper.SetInputData(molout)
+    actor = vtk.vtkActor()
+    actor.SetMapper(mapper)
+    actor.GetProperty().SetOpacity(opacity)
+    return MyvtkActor(actor, mol)
+
+
+def fillmolecule_custom(atm, crd, 
+                 opacity=1, bond_radius=None, atom_radius_scale=None,
+                 tubes_mode=False,
+                 bond_tollerance=0.23,
+                 excluded_atoms=None) -> MyvtkActor:
+    """
+    Create a VTK molecule visualization.
+
+    Args:
+        atm: List of atomic numbers
+        crd: Coordinates array
+        representation (legacy parameter)
+        opacity (float): Molecule opacity (0.0-1.0)
+        bond_radius (float): Custom bond radius
+        atom_radius_scale (float): Custom atomic radius scale factor
+        tubes_mode (bool): If True, atoms use same radius as bonds
+    """
+    # TODO implement a true bond perceiver
+    mol = vtk.vtkMolecule()
+    atoms = []
+    for i in range(len(atm)):
+        atoms.append(mol.AppendAtom(atm[i], *crd[i]))
+    
+    # Use VTK bond perceiver
+    bond_perceiver = vtk.vtkSimpleBondPerceiver()
+    bond_perceiver.SetInputData(mol)
+    bond_perceiver.SetTolerance(bond_tollerance)
+    bond_perceiver.Update()
+    molout = bond_perceiver.GetOutput()
+    
+    mapper = vtk.vtkMoleculeMapper()
+    mapper.UseLiquoriceStickSettings()
+    mapper.UseMultiCylindersForBondsOn()
+    
+    # Apply bond radius if provided
+    if bond_radius is not None:
+        mapper.SetBondRadius(bond_radius)
+    
+    # Apply atom radius scale
+    if tubes_mode and bond_radius is not None:
+        # In tubes mode, atoms use the same size as bonds
+        mapper.SetAtomicRadiusScaleFactor(bond_radius)
+    elif atom_radius_scale is not None:
+        # Normal mode - use the specified atom radius scale
+        mapper.SetAtomicRadiusScaleFactor(atom_radius_scale)
+
+    if excluded_atoms is not None:
+        for i in range(molout.GetNumberOfBonds()):
+            bond = molout.GetBond(i)
+            atom1_id = bond.GetBeginAtomId()
+            atom2_id = bond.GetEndAtomId()
+            if atom1_id in excluded_atoms and atom2_id in excluded_atoms:
+                molout.SetBondOrder(i, 0)  # Exclude this bond
+
+   
     mapper.SetInputData(molout)
     actor = vtk.vtkActor()
     actor.SetMapper(mapper)

@@ -602,7 +602,7 @@ class QuiverSetupDialog(QDialog):
 
 
 class MoleculeConfigDialog(QDialog):
-    def __init__(self, parent=None, wireframe=False, opacity=1.0, bond_radius=0.03, atom_radius_scale=0.03, tubes_mode=False):
+    def __init__(self, parent=None, wireframe=False, opacity=1.0, bond_radius=0.03, atom_radius_scale=0.03, tubes_mode=False, bond_tollerance=0.23, hide_auto_group=False, has_auto_fragment=False):
         super().__init__(parent)
         
         self._wireframe = wireframe
@@ -610,6 +610,9 @@ class MoleculeConfigDialog(QDialog):
         self._bond_radius = bond_radius
         self._atom_radius_scale = atom_radius_scale
         self._tubes_mode = tubes_mode
+        self._bond_tollerance = bond_tollerance
+        self._hide_auto_group = hide_auto_group
+        self._has_auto_fragment = has_auto_fragment
         self._okexit = False
         
         self.setWindowTitle("Molecule Display Settings")
@@ -653,6 +656,15 @@ class MoleculeConfigDialog(QDialog):
         self.atomRadiusInput.setValidator(atom_validator)
         self.atomRadiusInput.setText(str(self._atom_radius_scale))
         
+        # Bond tolerance input
+        bondToleranceLabel = QLabel('Bond Tolerance:', self)
+        self.bondToleranceInput = QLineEdit(self)
+        tolerance_validator = QDoubleValidator()
+        tolerance_validator.setLocale(QLocale.c())
+        tolerance_validator.setRange(0.1, 2.0, 2)
+        self.bondToleranceInput.setValidator(tolerance_validator)
+        self.bondToleranceInput.setText(str(self._bond_tollerance))
+        
         # Wireframe preset button
         self.wireframeButton = QPushButton('Wireframe Preset (0.01)', self)
         self.wireframeButton.clicked.connect(self._apply_wireframe_preset)
@@ -673,7 +685,16 @@ class MoleculeConfigDialog(QDialog):
         self.grid_layout.addWidget(self.bondRadiusInput, 2, 1)
         self.grid_layout.addWidget(atomRadiusLabel, 3, 0)
         self.grid_layout.addWidget(self.atomRadiusInput, 3, 1)
-        self.grid_layout.addWidget(self.wireframeButton, 4, 0, 1, 2)
+        self.grid_layout.addWidget(bondToleranceLabel, 4, 0)
+        self.grid_layout.addWidget(self.bondToleranceInput, 4, 1)
+        
+        # Hide auto group checkbox
+        self.hideAutoGroupCheck = QCheckBox('Hide auto group', self)
+        self.hideAutoGroupCheck.setChecked(self._hide_auto_group)
+        self.hideAutoGroupCheck.setEnabled(self._has_auto_fragment)
+        self.grid_layout.addWidget(self.hideAutoGroupCheck, 5, 0, 1, 2)
+        
+        self.grid_layout.addWidget(self.wireframeButton, 6, 0, 1, 2)
         
         # Dialog buttons
         QBtn = QDialogButtonBox.Ok | QDialogButtonBox.Cancel
@@ -759,6 +780,13 @@ class MoleculeConfigDialog(QDialog):
             self._atom_radius_scale = float(self.atomRadiusInput.text())
         except ValueError:
             self._atom_radius_scale = 0.03
+            
+        try:
+            self._bond_tollerance = float(self.bondToleranceInput.text())
+        except ValueError:
+            self._bond_tollerance = 0.23
+            
+        self._hide_auto_group = self.hideAutoGroupCheck.isChecked()
             
         self._okexit = True
 
