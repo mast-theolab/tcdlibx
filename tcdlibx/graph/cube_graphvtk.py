@@ -316,7 +316,8 @@ def quiv3d(
     upper: float = 0.01,
     scale: float = 1,
     logscale: bool = False,
-    subsample_factor: tp.Optional[int] = None
+    subsample_factor: tp.Optional[int] = None,
+    glyphmode: str = 'arrow'
 ) -> MyvtkActor:
     """
     Return a vtk actor with 3D quiver plot
@@ -355,11 +356,18 @@ def quiv3d(
         mask.SetOnRatio(subsample_factor)
         mask.Update()
         _grid = mask.GetOutput()
-
-    arrow = vtk.vtkArrowSource()
+    if glyphmode == 'arrow':
+        vtkglyph = vtk.vtkArrowSource()
+    elif glyphmode == 'cone':
+        vtkglyph = vtk.vtkConeSource()
+        vtkglyph.SetResolution(12)
+        # vtkglyph.SetHeight(0.8)
+        # vtkglyph.SetRadius(0.3)
+    else:
+        raise ValueError("glyphmode must be 'arrow' or 'cone'")
     glyphs = vtk.vtkGlyph3D()
     glyphs.SetInputData(_grid)
-    glyphs.SetSourceConnection(arrow.GetOutputPort())
+    glyphs.SetSourceConnection(vtkglyph.GetOutputPort())
     # the mapper
     glyph_mapper = vtk.vtkPolyDataMapper()
     glyph_mapper.SetInputConnection(glyphs.GetOutputPort())

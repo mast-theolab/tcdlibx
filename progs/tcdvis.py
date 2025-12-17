@@ -756,7 +756,11 @@ class TCDvis(QMainWindow):
                         del self._actors['tcdbar']
                     if fieldprm._direction and 'tcddir' not in self._actors:
                         tmp_cube = copy.deepcopy(self._fchk.get_tcd(self._activest))
-                        self._actors['tcddir'] = cubetk.draw_cones_nogrid(tmp_cube, self._seeds)
+                        # self._actors['tcddir'] = cubetk.draw_cones_nogrid(tmp_cube, self._seeds)
+                        self._actors['tcddir'] = cubetk.quiv3d(tmp_cube, 
+                                               scale=self._default["quiver"]["scale"]/5,
+                                               subsample_factor=100,
+                                               glyphmode='cone')
                         self.ren.AddActor(self._actors['tcddir'].actor)
                     elif 'tcddir' in self._actors:
                         self.ren.RemoveActor(self._actors['tcddir'].actor)
@@ -1188,7 +1192,11 @@ class TCDvis(QMainWindow):
                 # instead of using the seeds points, 
                 # we can show hedehogs with cone gliphs
                 # and a sparse sampling of the vector field
-                self._actors['tcddir'] = cubetk.draw_cones_nogrid(tmp_cube, self._seeds)
+                # self._actors['tcddir'] = cubetk.draw_cones_nogrid(tmp_cube, self._seeds)
+                self._actors['tcddir'] = cubetk.quiv3d(tmp_cube, 
+                                               scale=self._default["quiver"]["scale"]/5,
+                                               subsample_factor=100,
+                                               glyphmode='cone')
             
             # Add animated particles if enabled
             if self._default["vfield"]["animate_particles"]:
