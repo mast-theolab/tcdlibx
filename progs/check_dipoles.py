@@ -73,6 +73,7 @@ def main():
     print(f"State: {args.state}")
     # check only the electronic component
     fchk_dip = fchk.get_dtm(state, tps='ele', cgs=False)
+    fchk_dip_tot = fchk.get_dtm(state, tps='tot', cgs=False)
     cub_dip = fchk.get_tcd_dtm(state, cgs=False)
     if moltype == 'ele':
         fchk_dip_cgs = (ele_edip_cgs(fchk_dip[0]), ele_mdip_cgs(fchk_dip[1]))
@@ -82,8 +83,13 @@ def main():
         cub_dip = list(cub_dip)
         print(cub_dip[0], fchk._moldata['freq'][state])
         cub_dip[0] = cub_dip[0] / (fchk._moldata['freq'][state] /phys_fact("au2cm1"))
+        cub_dip[0] = cub_dip[0] / (np.sqrt(fchk._moldata['rmas'][state]*1822.888486209))  # convert to mass-weighted
         fchk_dip_cgs = (edip_cgs(fchk_dip[0], fchk._moldata['freq'][state]), mdip_cgs(fchk_dip[1], fchk._moldata['freq'][state]))
+        fchk_dip_tot_cgs = (edip_cgs(fchk_dip_tot[0], fchk._moldata['freq'][state]), mdip_cgs(fchk_dip_tot[1], fchk._moldata['freq'][state]))
         cub_dip_cgs = (edip_cgs(cub_dip[0], fchk._moldata['freq'][state]), mdip_cgs(cub_dip[1], fchk._moldata['freq'][state]))
+
+    print(f"DS: {np.dot(fchk_dip_tot_cgs[0], fchk_dip_tot_cgs[0])} RS: {np.dot(fchk_dip_tot_cgs[0], fchk_dip_tot_cgs[1])}")
+
 
     print(f"fchk EDTM: {fchk_dip[0][0]:10.5f}{fchk_dip[0][1]:10.5f}{fchk_dip[0][2]:10.5f}")
     print(f"cube EDTM: {cub_dip[0][0]:10.5f}{cub_dip[0][1]:10.5f}{cub_dip[0][2]:10.5f}")

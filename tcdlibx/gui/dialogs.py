@@ -8,12 +8,15 @@ from PySide6.QtWidgets import QLineEdit, QFileDialog, QPushButton, QMessageBox, 
 from tcdlibx.utils.var_tools import fuzzy_equal
 
 class SavePngDialog(QDialog):
-    def __init__(self, parent=None, fname="tcdfigure.png"):
+    def __init__(self, parent=None, fname="tcdfigure.png", figure_size=None):
         super().__init__(parent)
         self._fname = fname
         self._okexit = False
         self._dpi = 150  # Default DPI
         self._folder = os.path.dirname(fname) if os.path.dirname(fname) else "."
+        self._figure_size = figure_size  # (width, height) of the displayed figure
+        self._width = None
+        self._height = None
         
         # PNG name input
         nameLabel = QLabel('PNG name:', self)
@@ -34,6 +37,32 @@ class SavePngDialog(QDialog):
         self.dpiInput.setText(str(self._dpi))
         self.dpiInput.textEdited.connect(self._update_dpi)
         
+        # File size options
+        sizeLabel = QLabel('Image size:', self)
+        self.sizeCombo = QComboBox(self)
+        self.sizeCombo.addItem("1 column (8.25 cm width)", "1col")
+        self.sizeCombo.addItem("2 column (17.8 cm width)", "2col")
+        self.sizeCombo.addItem("Custom", "custom")
+        self.sizeCombo.currentIndexChanged.connect(self._on_size_changed)
+        
+        # Custom width input (initially hidden)
+        customLabel = QLabel('Custom width (px):', self)
+        self.customWidthInput = QLineEdit(self)
+        width_validator = QIntValidator(100, 10000, self)  # Width range 100-10000 px
+        self.customWidthInput.setValidator(width_validator)
+        # Set default custom width to 1 column at current DPI
+        default_width = int((8.25 / 2.54) * self._dpi)
+        self.customWidthInput.setText(str(default_width))
+        self.customWidthInput.textEdited.connect(self._update_custom_size)
+        
+        # Initially hide custom width controls
+        customLabel.setVisible(False)
+        self.customWidthInput.setVisible(False)
+        self._customLabel = customLabel
+        
+        # Set default size based on DPI
+        self._update_size_from_dpi()
+        
         # Folder selection
         folderLabel = QLabel('Save in:', self)
         self.folderPath = QLineEdit(self)
@@ -50,9 +79,13 @@ class SavePngDialog(QDialog):
         self.grid_layout.addWidget(self.pngname, 0, 1, 1, 2)
         self.grid_layout.addWidget(dpiLabel, 1, 0)
         self.grid_layout.addWidget(self.dpiInput, 1, 1, 1, 2)
-        self.grid_layout.addWidget(folderLabel, 2, 0)
-        self.grid_layout.addWidget(self.folderPath, 2, 1)
-        self.grid_layout.addWidget(self.browseButton, 2, 2)
+        self.grid_layout.addWidget(sizeLabel, 2, 0)
+        self.grid_layout.addWidget(self.sizeCombo, 2, 1, 1, 2)
+        self.grid_layout.addWidget(self._customLabel, 3, 0)
+        self.grid_layout.addWidget(self.customWidthInput, 3, 1, 1, 2)
+        self.grid_layout.addWidget(folderLabel, 4, 0)
+        self.grid_layout.addWidget(self.folderPath, 4, 1)
+        self.grid_layout.addWidget(self.browseButton, 4, 2)
 
         QBtn = QDialogButtonBox.Ok | QDialogButtonBox.Cancel
         self.buttonBox = QDialogButtonBox(QBtn)
@@ -70,6 +103,9 @@ class SavePngDialog(QDialog):
     def _getpng(self):
         self._fname = os.path.join(self._folder, self.pngname.text())
         self._dpi = int(self.dpiInput.text()) if self.dpiInput.text() else 150
+        
+        # Recalculate size based on current DPI setting
+        self._update_size_from_dpi()
         
         # Check if file already exists
         if os.path.exists(self._fname):
@@ -95,14 +131,75 @@ class SavePngDialog(QDialog):
     def _update_dpi(self):
         try:
             self._dpi = int(self.dpiInput.text())
+            self._update_size_from_dpi()
         except ValueError:
             self._dpi = 150
+    
+    def _update_size_from_dpi(self):
+        """Calculate pixel dimensions based on physical size and DPI"""
+        current_data = self.sizeCombo.currentData()
+        if current_data == "1col":
+            # 1 column: 8.25 cm = 3.248 inches
+            width_inches = 8.25 / 2.54
+            self._width = int(width_inches * self._dpi)
+        elif current_data == "2col":
+            # 2 column: 17.8 cm = 7.008 inches
+            width_inches = 17.8 / 2.54
+            self._width = int(width_inches * self._dpi)
+        elif current_data == "custom":
+            try:
+                self._width = int(self.customWidthInput.text())
+            except ValueError:
+                # Default to 1 column at current DPI
+                width_inches = 8.25 / 2.54
+                self._width = int(width_inches * self._dpi)
+        
+        self._update_height()
     
     def _browse_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Select Save Directory", self._folder)
         if folder:
             self._folder = folder
             self.folderPath.setText(folder)
+    
+    def _on_size_changed(self, index):
+        """Handle size combo box changes"""
+        current_data = self.sizeCombo.currentData()
+        is_custom = current_data == "custom"
+        
+        # Show/hide custom width controls
+        self._customLabel.setVisible(is_custom)
+        self.customWidthInput.setVisible(is_custom)
+        
+        # Update width and height based on current selection and DPI
+        self._update_size_from_dpi()
+    
+    def _update_custom_size(self):
+        """Update size when custom width is edited"""
+        if self.sizeCombo.currentData() == "custom":
+            try:
+                self._width = int(self.customWidthInput.text())
+                self._update_height()
+            except ValueError:
+                pass
+    
+    def _update_height(self):
+        """Calculate height based on width and figure proportions"""
+        if self._figure_size and self._width:
+            # Calculate height maintaining aspect ratio
+            fig_width, fig_height = self._figure_size
+            if fig_width > 0:
+                aspect_ratio = fig_height / fig_width
+                self._height = int(self._width * aspect_ratio)
+            else:
+                self._height = int(self._width * 0.75)  # Default 4:3 ratio
+        else:
+            # Default aspect ratio if no figure size is provided
+            self._height = int(self._width * 0.75)  # Default 4:3 ratio
+    
+    def get_size(self):
+        """Return the selected width and height in pixels"""
+        return self._width, self._height
 
 
 class SavePngSeriesDialog(QDialog):

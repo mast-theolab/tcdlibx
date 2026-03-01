@@ -861,7 +861,7 @@ class VtcdData(VecCubeData):
     def mu_integrate(self, mask=None):
         """integrate vector field in all space"""
         # TODO prefactor
-        integrated = self.integrate(mask=mask) * -1 
+        integrated = self.integrate(mask=mask) * -1 * 2
         return integrated
 
     def mag_integrate(self, mask=None, origin=None):

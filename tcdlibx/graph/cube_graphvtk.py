@@ -388,7 +388,8 @@ def quiv3d(
     # filtering
     threshold = vtk.vtkThresholdPoints()
     threshold.SetInputData(_grid)
-    threshold.ThresholdBetween(lower, upper)
+    threshold.SetLowerThreshold(lower)
+    threshold.SetUpperThreshold(upper)
     glyphs.SetInputConnection(threshold.GetOutputPort())
 
     return MyvtkActor(glyph_actor, glyphs)
@@ -451,6 +452,9 @@ def draw_nm3d(crd, evec, ian,
     polydata = create_vector_field_polydata(crd, norm_evec, np.ones(natm), vector_name='vector', scalar_name='ones')
 
     arrow = vtk.vtkArrowSource()
+    # increase the resolution of the arrow for better visualization
+    arrow.SetTipResolution(12)
+    arrow.SetShaftResolution(12)
     glyphs = vtk.vtkGlyph3D()
     glyphs.SetInputData(polydata)
     glyphs.SetSourceConnection(arrow.GetOutputPort())
@@ -526,6 +530,8 @@ def draw_vectors(crd, vecs, tps, scale=1):
     polydata.GetPointData().SetActiveScalars('ones')
 
     arrow = vtk.vtkArrowSource()
+    arrow.SetTipResolution(12)
+    arrow.SetShaftResolution(12)
     glyphs = vtk.vtkGlyph3D()
     glyphs.SetInputData(polydata)
     glyphs.SetSourceConnection(arrow.GetOutputPort())
@@ -538,7 +544,7 @@ def draw_vectors(crd, vecs, tps, scale=1):
 
     # color map
     lut = vtk.vtkColorTransferFunction()
-    lut.AddRGBPoint(-4, 1,.3,1)
+    lut.AddRGBPoint(-4, 102/255,0,102/255)
     lut.AddRGBPoint(-3, 153/255,0,0)
     lut.AddRGBPoint(-2, 1,0,0)
     lut.AddRGBPoint(-1, 1,128/255,0)
@@ -546,7 +552,7 @@ def draw_vectors(crd, vecs, tps, scale=1):
     lut.AddRGBPoint(1, 125/255,1,0)
     lut.AddRGBPoint(2, 0,1,0)
     lut.AddRGBPoint(3, 0,102/255,0)
-    lut.AddRGBPoint(4, 1,1,0)
+    lut.AddRGBPoint(4, 0,102/255,51/255)
     glyph_mapper.SetLookupTable(lut)
 
     glyphs.SetVectorModeToUseVector()

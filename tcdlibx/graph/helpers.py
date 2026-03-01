@@ -254,6 +254,8 @@ class VibMolecule(Molecule):
                    np.einsum("j,jk->k", self._moldata['lx'][vib], self._moldata['aatnuc']))
         else:
             raise NoValidData("Molecule.get_dtm", 'No valid dtm type: tot, ele, nuc')
+        # print(np.einsum("j,jk->k", self._moldata['lx'][vib], self._moldata['aptnuc']))
+        # print(np.einsum("j,jk->k", self._moldata['lx'][vib], self._moldata['aatnuc']))
         if cgs:
             res = (edip_cgs(res[0], self.get_freq(vib)),
                    mdip_cgs(res[1], self.get_freq(vib))) 

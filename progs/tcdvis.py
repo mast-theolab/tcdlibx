@@ -503,27 +503,58 @@ class TCDvis(QMainWindow):
         self._updatereder()
 
     def save_png(self):
-        #
-        pngdialog = SavePngDialog(fname=self._lastfname)
+        # Get current render window size for aspect ratio calculation
+        render_window = self.vtkWidget.GetRenderWindow()
+        current_size = render_window.GetSize()
+        figure_size = (current_size[0], current_size[1])
+        
+        pngdialog = SavePngDialog(fname=self._lastfname, figure_size=figure_size)
         pngdialog.exec()
         self._lastfname = pngdialog._fname
         if pngdialog._okexit:
-            # Calculate magnification factor based on DPI
-            # VTK default is approximately 72 DPI
-            magnification = max(1, int(pngdialog._dpi / 72))
+            # Get the desired output size and DPI from dialog
+            output_width, output_height = pngdialog.get_size()
+            target_dpi = pngdialog._dpi
             
-            # w2if = vtk.vtkWindowToImageFilter()
+            # Get current render window size
+            render_window = self.vtkWidget.GetRenderWindow()
+            current_size = render_window.GetSize()
+            
+            # Calculate magnification needed to achieve target DPI
+            # VTK's default is 72 DPI, so magnification = target_dpi / 72
+            magnification = target_dpi / 72.0
+            
+            # Use vtkRenderLargeImage to properly handle DPI
             w2if = vtk.vtkRenderLargeImage()
             w2if.SetInput(self.ren)
-            w2if.SetMagnification(magnification)
-            # w2if.SetInputBufferTypeToRGB()
-            # w2if.ReadFrontBufferOff()
+            w2if.SetMagnification(int(magnification))
+            
+
+            # base_width = int(output_width * magnification)
+            base_width = int(output_width)
+            # base_height = int(output_height * magnification)
+            base_height = int(output_height)
+            
+            # Temporarily set render window to base size
+            original_size = render_window.GetSize()
+            render_window.SetSize(base_width, base_height)
+            render_window.Render()
+            
+            # Now render with magnification
             w2if.Update()
 
+            # Create PNG writer and set DPI information
             writer = vtk.vtkPNGWriter()
             writer.SetFileName(self._lastfname)
             writer.SetInputConnection(w2if.GetOutputPort())
+            
+            # Write the image
             writer.Write()
+                        
+            # Restore original render window size
+            render_window.SetSize(original_size[0], original_size[1])
+            render_window.Render()
+            # BUG metadata of figure are wrong
 
     def save_png_rotation(self):
         #
@@ -617,8 +648,68 @@ class TCDvis(QMainWindow):
         if 'mol' in self._menus and 'transparent' in self._menus['mol']:
             self._menus['mol']['transparent'].setChecked(False)
         
+        # Reset TCD-related interface elements
+        self._reset_tcd_interface()
+        
         # Reset any other interface elements that might cause conflicts
         # between vibrational and electronic molecule types
+
+    def _reset_tcd_interface(self):
+        """Reset TCD-related interface elements to their default state"""
+        # Reset state line to default state
+        self.stline.setText("1")
+        self.stline.setEnabled(False)
+        self.stline.setStyleSheet("color: black;  background-color: white")
+        
+        # Reset TCD checkbox/control
+        self.etcdch.setEnabled(False)
+        
+        # Reset isoline control
+        self.isoline.setText(f"{self._default['isoval']['iso']:.6f}")
+        self.isoline.setEnabled(False)
+        
+        # Reset property combo box to first item
+        if hasattr(self, 'prop'):
+            self.prop.setCurrentIndex(0)
+        
+        # Disable TCD-related menu items
+        if hasattr(self, '_menus'):
+            if 'etcd' in self._menus and 'dmt' in self._menus['etcd']:
+                self._menus['etcd']['dmt'].setEnabled(False)
+            if 'vtcd' in self._menus and 'dmt' in self._menus['vtcd']:
+                self._menus['vtcd']['dmt'].setEnabled(False)
+            if 'etcddtm' in self._menus and 'frags' in self._menus['etcddtm']:
+                self._menus['etcddtm']['frags'].setEnabled(False)
+            if 'vtcddtm' in self._menus and 'frags' in self._menus['vtcddtm']:
+                self._menus['vtcddtm']['frags'].setEnabled(False)
+        
+        # Reset DTM-related elements
+        self._reset_dtm_interface()
+
+    def _reset_dtm_interface(self):
+        """Reset DTM-related interface elements to their default state"""
+        # Clear any existing DTM visualizations
+        if hasattr(self, '_actors') and 'mfpdtm' in self._actors:
+            self.ren.RemoveActor(self._actors['mfpdtm'].actor)
+            self._actors.pop('mfpdtm')
+        
+        # Disable and uncheck DTM menu items
+        if hasattr(self, '_menus'):
+            # Reset electronic DTM menus
+            if 'mol' in self._menus and 'edmt' in self._menus['mol']:
+                self._menus['mol']['edmt'].setEnabled(False)
+            if 'eledmt' in self._menus:
+                for key in self._menus['eledmt']:
+                    if key != 'menu' and hasattr(self._menus['eledmt'][key], 'setChecked'):
+                        self._menus['eledmt'][key].setChecked(False)
+            
+            # Reset vibrational DTM menus  
+            if 'mol' in self._menus and 'vibdmt' in self._menus['mol']:
+                self._menus['mol']['vibdmt'].setEnabled(False)
+            if 'vibdmt' in self._menus:
+                for key in self._menus['vibdmt']:
+                    if key != 'menu' and hasattr(self._menus['vibdmt'][key], 'setChecked'):
+                        self._menus['vibdmt'][key].setChecked(False)
 
     def _enable_molmenu(self):
         for val in self._menus['mol']:
@@ -843,6 +934,9 @@ class TCDvis(QMainWindow):
         self._cleanactors()
         self._actors = {}
         self._has_auto_fragment = False  # Reset auto-fragment flag when opening new file
+        
+        # Reset active state to first state
+        self._activest = 0
         
         # Reset interface state to prevent issues when switching molecule types
         self._reset_interface_state()
@@ -1468,6 +1562,34 @@ class TCDvis(QMainWindow):
         res['Camera:ClippingRange'] = camera.GetClippingRange()
         res['Used parameters'] = self._default
         write_json(res, fname)
+
+    def _batch_operations(self):
+        """Performs batch operations on multiple files using a configuration JSON file.
+        This function open the JSON file via a file dialog, reads the file and performs the operations.
+        The structure of the JSON is:
+        {
+            "systems":[
+            {
+                "fname": "prefix_fname",
+                "fchk": "path_to_fchk",
+                "cubes":{"#nstate": "path_to_cube"},
+                "aim": "path_to_aim_cube",
+                "groups": "path_to_groups_json",
+            }
+            ],
+            "operations":[{
+                "type": "operation_type", # e.g. streamlines, quiver, moe, eom, eoe
+                "show_dmt": true/false,
+                "show_nm": true/false,
+                "image_size": [width, height],
+                "dpi": 300,
+                "output_dir": "path_to_output_directory"
+                }
+            ],
+            "settings": "path_to_settings_json"
+        }
+        """
+        pass
 
 
 def main():
