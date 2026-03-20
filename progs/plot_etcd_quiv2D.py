@@ -3,7 +3,6 @@
 Plot Electronic Transition Current Density (ETCD) in 2D with quiver plots.
 
 Example: python3 plot_ETCD_quiv2D.py -a y --vscale=100 \
-        allene_F2.anh.2nq.GVPT2.full.fchk \
         TCD_S001.cube
 """
 import sys
@@ -39,19 +38,12 @@ def build_parser():
     par = argparse.ArgumentParser(prog=PROGNAME,
                                   formatter_class=argparse.RawTextHelpFormatter)
     # MANDATORY ARGUMENTS
-    txt = "Gaussian fchk with molecular geometry and data"
-    par.add_argument('refstate', help=txt)
     txt = "Transition current density cube file to visualize"
     par.add_argument('cubefile', help=txt)
     # OPTIONAL ARGUMENTS
     par.add_argument('-p', '--print', action='store_true',
                      help='Print molecule')
-    # -- DRAWING PARAMETERS
-    # vis = p.add_subparsers('-2d',help='2D-projection')
-
     draw = par.add_argument_group('Drawing parameters')
-    # raw.add_argument('-v', '--view', choices=('2d', '3d'), default='3d',
-    #                 help='type of graph. 2D or 3D')
     draw.add_argument('-a', '--axis', choices=('x', 'y', 'z'), default='z',
                       help='Axis for the projection')
     draw.add_argument('--vscale', type=float, default=5.,
@@ -89,9 +81,6 @@ if __name__ == '__main__':
     SCF = [1., 1.]
     
     # Check that data files exist
-    if not os.path.exists(OPTS.refstate):
-        print(cp.printred('ERROR: refstate file {} does not exist'.format(OPTS.refstate)))
-        sys.exit()
     if not os.path.exists(OPTS.cubefile):
         print(cp.printred('ERROR: cube file {} does not exist'.format(OPTS.cubefile)))
         sys.exit()
@@ -101,7 +90,12 @@ if __name__ == '__main__':
     else:
         ngrdstp = NSTEP_BOX
     # Get molecule information
-    data = fio.fchk_vib_parser(OPTS.refstate)
+    # Parse and load cube data
+    print('Loading molecular and transition current density from cube file...')
+    cubdat = cb.cube_parser(OPTS.cubefile)
+    cubdat.make_box()
+
+
     if OPTS.print:
         print('''
 ########################################
@@ -111,20 +105,15 @@ if __name__ == '__main__':
 Coordinates (in Bohr)
 ''')
         fmt = 'Atom {:3d}  {:2s}  {c[0]:12.6f} {c[1]:12.6f} {c[2]:12.6f}'
-        for ia in range(data['natoms']):
-            ian = data['ian'][ia]
-            xyz = data['crd'][ia, :] / PHYSFACT.bohr2ang
+        for ia in range(cubdat.natoms):
+            ian = cubdat.ian[ia]
+            xyz = cubdat.crd[ia, :] / PHYSFACT.bohr2ang
             print(fmt.format(ia+1, ELEMENTS[ian], c=xyz))
-
-    # Parse and load cube data
-    print('Loading transition current density from cube file...')
-    cubdat = cb.cube_parser(OPTS.cubefile)
-    cubdat.make_box()
 
     # Apply subgrid if specified
     if OPTS.xmin or OPTS.xmax or OPTS.ymin or \
        OPTS.ymax or OPTS.zmin or OPTS.zmax:
-        vec = cbplt.set_subgrid(cubdat,
+        cubdat = cbplt.set_subgrid(cubdat,
                                 OPTS.xmin, OPTS.xmax, OPTS.ymin,
                                 OPTS.ymax, OPTS.zmin, OPTS.zmax)
 

@@ -4,7 +4,7 @@ from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QGridLayout
 from PySide6.QtCore import QRegularExpression, QLocale, Qt
 from PySide6.QtGui import QRegularExpressionValidator, QIntValidator, QDoubleValidator
 from PySide6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QCheckBox, QComboBox
-from PySide6.QtWidgets import QLineEdit, QFileDialog, QPushButton, QMessageBox, QColorDialog, QSlider, QRadioButton, QButtonGroup
+from PySide6.QtWidgets import QLineEdit, QFileDialog, QPushButton, QMessageBox, QColorDialog, QSlider, QRadioButton, QButtonGroup, QFrame
 from tcdlibx.utils.var_tools import fuzzy_equal
 
 class SavePngDialog(QDialog):
@@ -655,18 +655,24 @@ class QuiverSetupDialog(QDialog):
     def __init__(self,
                  scale: float,
                  subsamp: int,
+                 enable_clipping: bool = False,
+                 clip_bounds: tp.Optional[tp.Dict[str, tp.Optional[float]]] = None,
                  parent: tp.Optional[tp.Union[QDialog, None]] = None) -> None:
         """ initialize the dialog. Requires a dictionary with the parameters,
             the maximum norm value in the field and optionally a parent dialog
 
         Args:
             scale (float): scaling factor for arrows
-            nseeds (int): Subsampling of the grid for arrows
+            subsamp (int): Subsampling of the grid for arrows
+            enable_clipping (bool): whether spatial clipping is enabled
+            clip_bounds (tp.Optional[tp.Dict[str, tp.Optional[float]]]): clipping bounds
             parent (tp.Optional[tp.Union[QDialog, None]]): Not required
         """
         super().__init__(parent)
         self._scale = scale
         self._subsamp = subsamp
+        self._enable_clipping = enable_clipping
+        self._clip_bounds = clip_bounds or {}
         self.setWindowTitle("Quiver Setup Dialog")
         self.vlay = QVBoxLayout()
         grid = QGridLayout()
@@ -681,6 +687,72 @@ class QuiverSetupDialog(QDialog):
         self._subsampline = EditIntLine("Subsampling", subsamp, QIntValidator(1, 500))
         grid.addWidget(message, 2, 0)
         grid.addLayout(self._subsampline._hlay, 3, 0)
+        
+        # Spatial clipping section
+        self._clipping_checkbox = QCheckBox("Enable Spatial Clipping")
+        self._clipping_checkbox.setChecked(enable_clipping)
+        self._clipping_checkbox.stateChanged.connect(self._toggle_clipping)
+        grid.addWidget(self._clipping_checkbox, 4, 0, 1, 2)
+        
+        # Create clipping controls group (initially hidden)
+        self._clipping_frame = QFrame()
+        self._clipping_frame.setFrameStyle(QFrame.StyledPanel)
+        clipping_layout = QGridLayout(self._clipping_frame)
+        
+        # X bounds
+        x_label = QLabel("X Range (Bohr):")
+        clipping_layout.addWidget(x_label, 0, 0)
+        
+        self._xmin_input = QLineEdit()
+        self._xmin_input.setPlaceholderText("xmin (leave empty for no limit)")
+        self._xmin_input.setText(str(self._clip_bounds.get('xmin', '')) if self._clip_bounds.get('xmin') is not None else '')
+        clipping_layout.addWidget(self._xmin_input, 0, 1)
+        
+        self._xmax_input = QLineEdit()
+        self._xmax_input.setPlaceholderText("xmax (leave empty for no limit)")
+        self._xmax_input.setText(str(self._clip_bounds.get('xmax', '')) if self._clip_bounds.get('xmax') is not None else '')
+        clipping_layout.addWidget(self._xmax_input, 0, 2)
+        
+        # Y bounds
+        y_label = QLabel("Y Range (Bohr):")
+        clipping_layout.addWidget(y_label, 1, 0)
+        
+        self._ymin_input = QLineEdit()
+        self._ymin_input.setPlaceholderText("ymin (leave empty for no limit)")
+        self._ymin_input.setText(str(self._clip_bounds.get('ymin', '')) if self._clip_bounds.get('ymin') is not None else '')
+        clipping_layout.addWidget(self._ymin_input, 1, 1)
+        
+        self._ymax_input = QLineEdit()
+        self._ymax_input.setPlaceholderText("ymax (leave empty for no limit)")
+        self._ymax_input.setText(str(self._clip_bounds.get('ymax', '')) if self._clip_bounds.get('ymax') is not None else '')
+        clipping_layout.addWidget(self._ymax_input, 1, 2)
+        
+        # Z bounds
+        z_label = QLabel("Z Range (Bohr):")
+        clipping_layout.addWidget(z_label, 2, 0)
+        
+        self._zmin_input = QLineEdit()
+        self._zmin_input.setPlaceholderText("zmin (leave empty for no limit)")
+        self._zmin_input.setText(str(self._clip_bounds.get('zmin', '')) if self._clip_bounds.get('zmin') is not None else '')
+        clipping_layout.addWidget(self._zmin_input, 2, 1)
+        
+        self._zmax_input = QLineEdit()
+        self._zmax_input.setPlaceholderText("zmax (leave empty for no limit)")
+        self._zmax_input.setText(str(self._clip_bounds.get('zmax', '')) if self._clip_bounds.get('zmax') is not None else '')
+        clipping_layout.addWidget(self._zmax_input, 2, 2)
+        
+        # Add double validators for coordinate inputs
+        coord_validator = QDoubleValidator()
+        coord_validator.setLocale(QLocale('English'))
+        for input_field in [self._xmin_input, self._xmax_input, self._ymin_input, 
+                           self._ymax_input, self._zmin_input, self._zmax_input]:
+            input_field.setValidator(coord_validator)
+        
+        # Add clipping frame to main layout
+        self.vlay.addWidget(self._clipping_frame)
+        
+        # Set initial visibility
+        self._clipping_frame.setVisible(enable_clipping)
 
         QBtn = QDialogButtonBox.Ok | QDialogButtonBox.Cancel 
 
@@ -696,6 +768,33 @@ class QuiverSetupDialog(QDialog):
     def _setvals(self):
         self._scale = self._scalemol._getvalue()
         self._subsamp = self._subsampline._getvalue()
+        
+        # Handle spatial clipping bounds
+        self._enable_clipping = self._clipping_checkbox.isChecked()
+        if self._enable_clipping:
+            # Parse coordinate inputs, handling empty strings as None
+            def parse_float_or_none(text):
+                try:
+                    return float(text) if text.strip() else None
+                except (ValueError, AttributeError):
+                    return None
+            
+            self._clip_bounds = {
+                'xmin': parse_float_or_none(self._xmin_input.text()),
+                'xmax': parse_float_or_none(self._xmax_input.text()),
+                'ymin': parse_float_or_none(self._ymin_input.text()),
+                'ymax': parse_float_or_none(self._ymax_input.text()),
+                'zmin': parse_float_or_none(self._zmin_input.text()),
+                'zmax': parse_float_or_none(self._zmax_input.text())
+            }
+        else:
+            self._clip_bounds = {}
+    
+    def _toggle_clipping(self):
+        """Toggle visibility of clipping controls"""
+        is_enabled = self._clipping_checkbox.isChecked()
+        self._clipping_frame.setVisible(is_enabled)
+        self._enable_clipping = is_enabled
 
 
 class MoleculeConfigDialog(QDialog):
@@ -889,7 +988,7 @@ class MoleculeConfigDialog(QDialog):
 
 
 class StreamLineSetupDialog(QDialog):
-    """Dialog for setting up stream lines
+    """Dialog for setting up stream lines with spatial clipping options
 
     Args:
         QDialog (_type_): _description_
@@ -910,6 +1009,8 @@ class StreamLineSetupDialog(QDialog):
                  particle_type: str = "sphere",
                  sampling_method: str = "ellipsoid",
                  scalevdw: float = 1.0,
+                 enable_clipping: bool = False,
+                 clip_bounds: tp.Optional[tp.Dict[str, tp.Optional[float]]] = None,
                  parent: tp.Optional[tp.Union[QDialog, None]] = None,
                  ) -> None:
         """ initialize the dialog. Requires a dictionary with the parameters,
@@ -918,6 +1019,8 @@ class StreamLineSetupDialog(QDialog):
         Args:
             params (tp.Dict[str, tp.Any]): dictionary with the parameters
             maxval (float): maximum norm value in the field
+            enable_clipping (bool): whether spatial clipping is enabled
+            clip_bounds (tp.Optional[tp.Dict[str, tp.Optional[float]]]): clipping bounds
             parent (tp.Optional[tp.Union[QDialog, None]]): Not required
         """
         super().__init__(parent)
@@ -934,6 +1037,8 @@ class StreamLineSetupDialog(QDialog):
         self._particle_type = particle_type
         self._sampling_method = sampling_method
         self._scalevdw = scalevdw
+        self._enable_clipping = enable_clipping
+        self._clip_bounds = clip_bounds or {}
         self._recalseeds = False
         self._redrawstream = False
         # print(f"vfmax:{self._vfmax} vfmin:{self._vfmin} mspeed:{self._mspeed} nseeds:{self._nseeds} scale:{self._scale}")
@@ -990,7 +1095,72 @@ class StreamLineSetupDialog(QDialog):
         seedvalid.setRange(1, 500)
         self._seedline = EditIntLine("Number of seeds", nseeds, seedvalid)
         grid.addItem(self._seedline._hlay, 2, 1)
-        # Ellipsoid scaling factor
+        # Spatial clipping section
+        self._clipping_checkbox = QCheckBox("Enable Spatial Clipping")
+        self._clipping_checkbox.setChecked(enable_clipping)
+        self._clipping_checkbox.stateChanged.connect(self._toggle_clipping)
+        grid.addWidget(self._clipping_checkbox, 7, 0, 1, 2)
+        
+        # Create clipping controls group (initially hidden)
+        self._clipping_frame = QFrame()
+        self._clipping_frame.setFrameStyle(QFrame.StyledPanel)
+        clipping_layout = QGridLayout(self._clipping_frame)
+        
+        # X bounds
+        x_label = QLabel("X Range (Bohr):")
+        clipping_layout.addWidget(x_label, 0, 0)
+        
+        self._xmin_input = QLineEdit()
+        self._xmin_input.setPlaceholderText("xmin (leave empty for no limit)")
+        self._xmin_input.setText(str(self._clip_bounds.get('xmin', '')) if self._clip_bounds.get('xmin') is not None else '')
+        clipping_layout.addWidget(self._xmin_input, 0, 1)
+        
+        self._xmax_input = QLineEdit()
+        self._xmax_input.setPlaceholderText("xmax (leave empty for no limit)")
+        self._xmax_input.setText(str(self._clip_bounds.get('xmax', '')) if self._clip_bounds.get('xmax') is not None else '')
+        clipping_layout.addWidget(self._xmax_input, 0, 2)
+        
+        # Y bounds
+        y_label = QLabel("Y Range (Bohr):")
+        clipping_layout.addWidget(y_label, 1, 0)
+        
+        self._ymin_input = QLineEdit()
+        self._ymin_input.setPlaceholderText("ymin (leave empty for no limit)")
+        self._ymin_input.setText(str(self._clip_bounds.get('ymin', '')) if self._clip_bounds.get('ymin') is not None else '')
+        clipping_layout.addWidget(self._ymin_input, 1, 1)
+        
+        self._ymax_input = QLineEdit()
+        self._ymax_input.setPlaceholderText("ymax (leave empty for no limit)")
+        self._ymax_input.setText(str(self._clip_bounds.get('ymax', '')) if self._clip_bounds.get('ymax') is not None else '')
+        clipping_layout.addWidget(self._ymax_input, 1, 2)
+        
+        # Z bounds
+        z_label = QLabel("Z Range (Bohr):")
+        clipping_layout.addWidget(z_label, 2, 0)
+        
+        self._zmin_input = QLineEdit()
+        self._zmin_input.setPlaceholderText("zmin (leave empty for no limit)")
+        self._zmin_input.setText(str(self._clip_bounds.get('zmin', '')) if self._clip_bounds.get('zmin') is not None else '')
+        clipping_layout.addWidget(self._zmin_input, 2, 1)
+        
+        self._zmax_input = QLineEdit()
+        self._zmax_input.setPlaceholderText("zmax (leave empty for no limit)")
+        self._zmax_input.setText(str(self._clip_bounds.get('zmax', '')) if self._clip_bounds.get('zmax') is not None else '')
+        clipping_layout.addWidget(self._zmax_input, 2, 2)
+        
+        # Add double validators for coordinate inputs
+        coord_validator = QDoubleValidator()
+        coord_validator.setLocale(QLocale('English'))
+        for input_field in [self._xmin_input, self._xmax_input, self._ymin_input, 
+                           self._ymax_input, self._zmin_input, self._zmax_input]:
+            input_field.setValidator(coord_validator)
+        
+        # Add clipping frame to main layout
+        self.vlay.addWidget(self._clipping_frame)
+        
+        # Set initial visibility
+        self._clipping_frame.setVisible(enable_clipping)
+        
         scaleval = QDoubleValidator()
         scaleval.setLocale(QLocale('English'))
         scaleval.setRange(.2, 10.)
@@ -1108,6 +1278,27 @@ class StreamLineSetupDialog(QDialog):
             self._redrawstream = True
         self._particle_type = self._particle_type_combo.currentText()
         self._sampling_method = "ellipsoid" if self._ellipsoid_radio.isChecked() else "molvolume"
+        
+        # Handle spatial clipping bounds
+        self._enable_clipping = self._clipping_checkbox.isChecked()
+        if self._enable_clipping:
+            # Parse coordinate inputs, handling empty strings as None
+            def parse_float_or_none(text):
+                try:
+                    return float(text) if text.strip() else None
+                except (ValueError, AttributeError):
+                    return None
+            
+            self._clip_bounds = {
+                'xmin': parse_float_or_none(self._xmin_input.text()),
+                'xmax': parse_float_or_none(self._xmax_input.text()),
+                'ymin': parse_float_or_none(self._ymin_input.text()),
+                'ymax': parse_float_or_none(self._ymax_input.text()),
+                'zmin': parse_float_or_none(self._zmin_input.text()),
+                'zmax': parse_float_or_none(self._zmax_input.text())
+            }
+        else:
+            self._clip_bounds = {}
         # print(f"vfmax:{self._vfmax} vfmin:{self._vfmin} mspeed:{self._mspeed} nseeds:{self._nseeds} scale:{self._scale}")
 
     def _setresample(self):
@@ -1132,4 +1323,10 @@ class StreamLineSetupDialog(QDialog):
         self._particleline._line.setEnabled(self._animate_particles)
         # Enable/disable particle type combo box based on animation checkbox
         self._particle_type_combo.setEnabled(self._animate_particles)
+    
+    def _toggle_clipping(self):
+        """Toggle visibility of clipping controls"""
+        is_enabled = self._clipping_checkbox.isChecked()
+        self._clipping_frame.setVisible(is_enabled)
+        self._enable_clipping = is_enabled
 

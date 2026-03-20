@@ -88,6 +88,79 @@ def create_vector_field_polydata(positions: np.ndarray,
     return polydata
 
 
+def apply_spatial_clipping(structured_grid: vtk.vtkStructuredGrid, 
+                          clip_bounds: tp.Dict[str, tp.Optional[float]]) -> vtk.vtkStructuredGrid:
+    """
+    Apply spatial clipping to a VTK structured grid using coordinate bounds.
+    
+    Args:
+        structured_grid: Input VTK structured grid to clip
+        clip_bounds: Dictionary with coordinate bounds, e.g.:
+                    {'xmin': -5.0, 'xmax': 5.0, 'ymin': None, 'ymax': 3.0, ...}
+                    None values indicate no limit in that direction
+    
+    Returns:
+        Clipped VTK structured grid
+    """
+    if not clip_bounds:
+        return structured_grid
+    
+    # Get grid dimensions and bounds
+    dimensions = structured_grid.GetDimensions()
+    bounds = structured_grid.GetBounds()  # [xmin, xmax, ymin, ymax, zmin, zmax]
+    
+    # Calculate grid spacing
+    dx = (bounds[1] - bounds[0]) / max(1, dimensions[0] - 1)
+    dy = (bounds[3] - bounds[2]) / max(1, dimensions[1] - 1) 
+    dz = (bounds[5] - bounds[4]) / max(1, dimensions[2] - 1)
+    
+    # Convert coordinate bounds to grid indices
+    def coord_to_index(coord, bounds_min, spacing, max_index):
+        """Convert coordinate to grid index, clamped to valid range"""
+        if coord is None:
+            return None
+        index = int((coord - bounds_min) / spacing)
+        return max(0, min(index, max_index))
+    
+    # Calculate index bounds for each axis
+    imin = coord_to_index(clip_bounds.get('xmin'), bounds[0], dx, dimensions[0] - 1)
+    imax = coord_to_index(clip_bounds.get('xmax'), bounds[0], dx, dimensions[0] - 1)
+    jmin = coord_to_index(clip_bounds.get('ymin'), bounds[2], dy, dimensions[1] - 1)
+    jmax = coord_to_index(clip_bounds.get('ymax'), bounds[2], dy, dimensions[1] - 1)
+    kmin = coord_to_index(clip_bounds.get('zmin'), bounds[4], dz, dimensions[2] - 1)
+    kmax = coord_to_index(clip_bounds.get('zmax'), bounds[4], dz, dimensions[2] - 1)
+    
+    # Use default bounds if not specified
+    if imin is None:
+        imin = 0
+    if imax is None:
+        imax = dimensions[0] - 1
+    if jmin is None:
+        jmin = 0
+    if jmax is None:
+        jmax = dimensions[1] - 1
+    if kmin is None:
+        kmin = 0
+    if kmax is None:
+        kmax = dimensions[2] - 1
+    
+    # Ensure max >= min for each axis
+    if imax < imin:
+        imax = imin
+    if jmax < jmin:
+        jmax = jmin
+    if kmax < kmin:
+        kmax = kmin
+    
+    # Apply VTK grid extraction
+    extract_grid = vtk.vtkExtractGrid()
+    extract_grid.SetInputData(structured_grid)
+    extract_grid.SetVOI(imin, imax, jmin, jmax, kmin, kmax)
+    extract_grid.Update()
+    
+    return extract_grid.GetOutput()
+
+
 def fillcubeimage(data, vec=True, logscale=False, aslist=False):
     """
     Fills a vtkImageData object
@@ -317,10 +390,11 @@ def quiv3d(
     scale: float = 1,
     logscale: bool = False,
     subsample_factor: tp.Optional[int] = None,
-    glyphmode: str = 'arrow'
+    glyphmode: str = 'arrow',
+    clip_bounds: tp.Optional[tp.Dict[str, tp.Optional[float]]] = None
 ) -> MyvtkActor:
     """
-    Return a vtk actor with 3D quiver plot
+    Return a vtk actor with 3D quiver plot with optional spatial clipping
 
     Args:
         vecdata: VecCubeData object or vtkPolyData with vector field
@@ -328,6 +402,8 @@ def quiv3d(
         scale: scale factor for arrows
         logscale: if True, use logarithmic scaling
         subsample_factor: if provided, show only every nth vector for better performance
+        glyphmode: 'arrow' or 'cone' for glyph type
+        clip_bounds: dict with xmin, xmax, ymin, ymax, zmin, zmax for spatial clipping
 
     Returns:
         MyvtkActor with quiver plot
@@ -341,6 +417,10 @@ def quiv3d(
 
     _grid.GetPointData().SetActiveVectors('vector')
     _grid.GetPointData().SetActiveScalars('scalar')
+    
+    # Apply spatial clipping if requested
+    if clip_bounds is not None and isinstance(vecdata, VecCubeData):
+        _grid = apply_spatial_clipping(_grid, clip_bounds)
 
     # Apply subsampling if requested
     # Only apply subsampling for VecCubeData
@@ -571,20 +651,24 @@ def fillstreamline(cubdata: CubeData,
                    clipping: tp.Optional[tuple] = (1e2, 1e5),
                    minspeed: tp.Optional[tp.Union[float, None]] = None,
                    seeds: tp.Optional[tp.Union[np.ndarray, None]] = None,
-                   scale_rad=1) -> MyvtkActor:
-    """_summary_
+                   scale_rad=1,
+                   clip_bounds: tp.Optional[tp.Dict[str, tp.Optional[float]]] = None) -> MyvtkActor:
+    """Generate streamlines from vector field with optional spatial clipping.
 
     Args:
-        cubdata (CubeData): _description_
-        nseeds (tp.Optional[int], optional): _description_. Defaults to 150.
-        center (tp.Optional[list], optional): _description_. Defaults to [0., 0., 0.].
-        opacity (tp.Optional[float], optional): _description_. Defaults to 0.3.
-        clipping (tp.Optional[tuple], optional): _description_. Defaults to (1e2, 1e5).
-        minvel (tp.Optional[tp.Union[float, None]], optional): _description_. Defaults to None.
-        scale_rad (int, optional): _description_. Defaults to 1.
+        cubdata (CubeData): Vector field cube data
+        nseeds (tp.Optional[int], optional): Number of seed points. Defaults to 150.
+        center (tp.Optional[list], optional): Center for seed distribution. Defaults to [0., 0., 0.].
+        opacity (tp.Optional[float], optional): Streamline opacity. Defaults to 0.3.
+        clipping (tp.Optional[tuple], optional): Magnitude clipping bounds. Defaults to (1e2, 1e5).
+        minspeed (tp.Optional[tp.Union[float, None]], optional): Minimum speed for termination. Defaults to None.
+        seeds (tp.Optional[tp.Union[np.ndarray, None]], optional): Custom seed points. Defaults to None.
+        scale_rad (int, optional): Radius scaling factor. Defaults to 1.
+        clip_bounds (tp.Optional[tp.Dict[str, tp.Optional[float]]], optional): 
+            Spatial clipping bounds with keys: xmin, xmax, ymin, ymax, zmin, zmax. Defaults to None.
 
     Returns:
-        vtk.vtkActor: _description_
+        MyvtkActor: VTK actor containing streamlines and optional clipped data reference
     """
 
     # Vectors stuff
@@ -592,7 +676,13 @@ def fillstreamline(cubdata: CubeData,
     _grid = fillcubeimage(cubdata)
     _grid.GetPointData().SetActiveVectors('vector')
     _grid.GetPointData().SetActiveScalars('scalar')
-    _bounds = _grid.GetScalarRange()
+    
+    # Apply spatial clipping if requested
+    clipped_grid = _grid
+    if clip_bounds is not None:
+        clipped_grid = apply_spatial_clipping(_grid, clip_bounds)
+    
+    _bounds = clipped_grid.GetScalarRange()
     # visualizing only a portion between the two bounds
     _bounds2 = (_bounds[1]/clipping[1],
                 _bounds[1]/clipping[0])
@@ -614,7 +704,7 @@ def fillstreamline(cubdata: CubeData,
     # Streamlines stuff
     integrator=vtk.vtkRungeKutta45()
     streamline = vtk.vtkStreamTracer()
-    streamline.SetInputData(_grid)
+    streamline.SetInputData(clipped_grid)  # Use clipped grid
     if _flag:
         streamline.SetSourceConnection(_seeds.GetOutputPort())
     else:
