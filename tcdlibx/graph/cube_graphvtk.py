@@ -88,26 +88,26 @@ def create_vector_field_polydata(positions: np.ndarray,
     return polydata
 
 
-def apply_spatial_clipping(structured_grid: vtk.vtkStructuredGrid, 
-                          clip_bounds: tp.Dict[str, tp.Optional[float]]) -> vtk.vtkStructuredGrid:
+def apply_spatial_clipping(grid_data: vtk.vtkImageData, 
+                          clip_bounds: tp.Dict[str, tp.Optional[float]]) -> vtk.vtkImageData:
     """
-    Apply spatial clipping to a VTK structured grid using coordinate bounds.
+    Apply spatial clipping to VTK ImageData using coordinate bounds.
     
     Args:
-        structured_grid: Input VTK structured grid to clip
+        grid_data: Input VTK ImageData to clip
         clip_bounds: Dictionary with coordinate bounds, e.g.:
                     {'xmin': -5.0, 'xmax': 5.0, 'ymin': None, 'ymax': 3.0, ...}
                     None values indicate no limit in that direction
     
     Returns:
-        Clipped VTK structured grid
+        Clipped VTK ImageData
     """
     if not clip_bounds:
-        return structured_grid
+        return grid_data
     
     # Get grid dimensions and bounds
-    dimensions = structured_grid.GetDimensions()
-    bounds = structured_grid.GetBounds()  # [xmin, xmax, ymin, ymax, zmin, zmax]
+    dimensions = grid_data.GetDimensions()
+    bounds = grid_data.GetBounds()  # [xmin, xmax, ymin, ymax, zmin, zmax]
     
     # Calculate grid spacing
     dx = (bounds[1] - bounds[0]) / max(1, dimensions[0] - 1)
@@ -152,13 +152,12 @@ def apply_spatial_clipping(structured_grid: vtk.vtkStructuredGrid,
     if kmax < kmin:
         kmax = kmin
     
-    # Apply VTK grid extraction
-    extract_grid = vtk.vtkExtractGrid()
-    extract_grid.SetInputData(structured_grid)
-    extract_grid.SetVOI(imin, imax, jmin, jmax, kmin, kmax)
-    extract_grid.Update()
-    
-    return extract_grid.GetOutput()
+    # Use vtkExtractVOI for vtkImageData
+    extract_filter = vtk.vtkExtractVOI()
+    extract_filter.SetInputData(grid_data)
+    extract_filter.SetVOI(imin, imax, jmin, jmax, kmin, kmax)
+    extract_filter.Update()
+    return extract_filter.GetOutput()
 
 
 def fillcubeimage(data, vec=True, logscale=False, aslist=False):

@@ -69,6 +69,22 @@ def build_parser():
                       comma separated values: [xmin,xmax,ymix,ymax]')
     draw.add_argument('--symplot', action='store_true',
                       help='''Center the 2D plot at the Origin (0,0)''')
+    draw.add_argument('-t', '--type', choices=('quiver', 'stream',
+                                               'animated_stream',
+                                               'stream2'),
+                      default='quiver',
+                      help='''Type of representation of vecfield:
+                      quiver/streamline/animatedstreamline''')
+    draw.add_argument('--figext', type=str,
+                      choices=('pdf', 'eps', 'png'),
+                      default='pdf',
+                      help='Figure extension')
+    # Molecule Drawing Parameters
+    molecule = par.add_argument_group('Drawing Molecule Parameters')
+    molecule.add_argument('--scaleNuc', type=float, default=1.0,
+                          help='''Enter the scaling factor for Nucleus circles''')
+    molecule.add_argument('--scaleBond', type=float, default=1.0,
+                          help='''Enter the scaling factor for Bonds''')
 
     return par
 
@@ -78,7 +94,7 @@ if __name__ == '__main__':
     PARSER = build_parser()
     OPTS = PARSER.parse_args()
     # Scale to use print_mol2d
-    SCF = [1., 1.]
+    SCF = [OPTS.scaleNuc, OPTS.scaleBond]
     
     # Check that data files exist
     if not os.path.exists(OPTS.cubefile):
@@ -113,7 +129,7 @@ Coordinates (in Bohr)
     # Apply subgrid if specified
     if OPTS.xmin or OPTS.xmax or OPTS.ymin or \
        OPTS.ymax or OPTS.zmin or OPTS.zmax:
-        cubdat = cbplt.set_subgrid(cubdat,
+        cubdat.cube = cbplt.set_subgrid(cubdat,
                                 OPTS.xmin, OPTS.xmax, OPTS.ymin,
                                 OPTS.ymax, OPTS.zmin, OPTS.zmax)
 
@@ -146,14 +162,31 @@ Coordinates (in Bohr)
     AT_BONDS = cbplt.get_connect(cubdat.ian, cubdat.crd)
     # Draw molecule
     cbplt.draw_mol2d(ax0, cubdat.crd, cubdat.ian, OPTS.axis, SCF,
-                     conmat=AT_BONDS, to_bohr=True)
+                     conmat=AT_BONDS, to_bohr=True, vollimit=[OPTS.xmin, OPTS.xmax, OPTS.ymin, OPTS.ymax, OPTS.zmin, OPTS.zmax])
     
     # Draw current density vectors
-    colma = plt.get_cmap("seismic")
-    quiv = ax0.quiver(box2[0, :], box2[1, :], vec2[0, :],
-                      vec2[1, :], units='width',
-                      scale=OPTS.vscale, cmap=colma,
-                      zorder=3)
+    if OPTS.type == 'quiver':
+        QUIV = cbplt.quiver_plt(ax0, cubdat, OPTS.axis, OPTS.vscale)
+        fig0.savefig(os.path.join(resfolder, 'quiv2D_axis{}.{}'.format(OPTS.axis, OPTS.figext)))
+    elif OPTS.type == 'stream':
+        STRM = cbplt.stream_plt(ax0, cubdat, OPTS.axis)
+        fig0.savefig(os.path.join(resfolder, 'stream2D_axis{}.{}'.format(OPTS.axis, OPTS.figext)))
+    else:
+        STRM = cbplt.stream2_plt(ax0, cubdat, OPTS.axis)
+        if OPTS.type == 'animated_stream':
+            ANIM = cbplt.animated_stream(fig0, STRM)
+            plt.show()
+        else:
+            fig0.savefig(os.path.join(resfolder,
+                                          'stream2D_axis{}.{}'.format(OPTS.axis, OPTS.figext)))
+        plt.close()
+
+
+    # colma = plt.get_cmap("seismic")
+    # quiv = ax0.quiver(box2[0, :], box2[1, :], vec2[0, :],
+    #                   vec2[1, :], units='width',
+    #                   scale=OPTS.vscale, cmap=colma,
+    #                   zorder=3)
     
     fig0.savefig(os.path.join(resfolder, 'etcd_quiv2D.pdf'))
     plt.close()

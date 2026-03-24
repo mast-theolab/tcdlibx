@@ -101,9 +101,13 @@ class TCDvis(QMainWindow):
                                     'showbar': False,
                                     'animate_particles': False,
                                     'num_particles': 15,
-                                    'particle_type': 'sphere'},
+                                    'particle_type': 'sphere',
+                                    'enable_clipping': False,
+                                    'clip_bounds': {}},
                          'quiver': {'scale': 100,
-                                   'subsample': 5},
+                                   'subsample': 5,
+                                   'enable_clipping': False,
+                                   'clip_bounds': {}},
                          'nmconfig': {'invert_phase': False,
                                      'scale_factor': 1.0,
                                      'color': (0.0, 0.0, 1.0)},
@@ -765,7 +769,9 @@ class TCDvis(QMainWindow):
                                              num_particles=self._default["vfield"]["num_particles"],
                                              particle_type=self._default["vfield"]["particle_type"],
                                              sampling_method=self._default["vfield"]["sampling_method"],
-                                             scalevdw=self._default["vfield"]["scalevdw"],)
+                                             scalevdw=self._default["vfield"]["scalevdw"],
+                                             enable_clipping=self._default["vfield"]["enable_clipping"],
+                                             clip_bounds=self._default["vfield"]["clip_bounds"])
             fieldprm.exec()
             # Update the default values
             self._default["vfield"]["vfmax"] = fieldprm._vfmax
@@ -798,6 +804,8 @@ class TCDvis(QMainWindow):
             self._default["vfield"]["animate_particles"] = fieldprm._animate_particles
             self._default["vfield"]["num_particles"] = fieldprm._num_particles
             self._default["vfield"]["particle_type"] = fieldprm._particle_type
+            self._default["vfield"]["enable_clipping"] = fieldprm._enable_clipping
+            self._default["vfield"]["clip_bounds"] = fieldprm._clip_bounds
             
             # Handle streamline-specific actors
             if 'tcd' in self._actors:
@@ -851,7 +859,8 @@ class TCDvis(QMainWindow):
                         self._actors['tcddir'] = cubetk.quiv3d(tmp_cube, 
                                                scale=self._default["quiver"]["scale"]/5,
                                                subsample_factor=100,
-                                               glyphmode='cone')
+                                               glyphmode='cone',
+                                               clip_bounds=self._default["vfield"]["clip_bounds"] if self._default["vfield"]["enable_clipping"] else None)
                         self.ren.AddActor(self._actors['tcddir'].actor)
                     elif 'tcddir' in self._actors:
                         self.ren.RemoveActor(self._actors['tcddir'].actor)
@@ -881,11 +890,15 @@ class TCDvis(QMainWindow):
         elif current_prop == "quiver":
             # Handle quiver setup dialog
             quiverprm = QuiverSetupDialog(scale=self._default["quiver"]["scale"],
-                                         subsamp=self._default["quiver"]["subsample"])
+                                         subsamp=self._default["quiver"]["subsample"],
+                                         enable_clipping=self._default["quiver"]["enable_clipping"],
+                                         clip_bounds=self._default["quiver"]["clip_bounds"])
             quiverprm.exec()
             # Update the default values
             self._default["quiver"]["scale"] = quiverprm._scale
             self._default["quiver"]["subsample"] = quiverprm._subsamp
+            self._default["quiver"]["enable_clipping"] = quiverprm._enable_clipping
+            self._default["quiver"]["clip_bounds"] = quiverprm._clip_bounds
             
             # Redraw quiver if it exists
             if 'tcd' in self._actors:
@@ -1278,7 +1291,8 @@ class TCDvis(QMainWindow):
                                                          clipping=(self._default["vfield"]["vfmax"],
                                                                     self._default["vfield"]["vfmin"]),
                                                          minspeed=self._default["vfield"]["mspeed"],
-                                                         seeds=self._seeds)
+                                                         seeds=self._seeds,
+                                                         clip_bounds=self._default["vfield"]["clip_bounds"] if self._default["vfield"]["enable_clipping"] else None)
             if self._default["vfield"]["showbar"]:
                 self._actors['tcdbar'] = cubetk.draw_colorbar(self._actors['tcd'].actor, "Norm(J)")
             if self._default["vfield"]["showdir"]:
@@ -1290,7 +1304,8 @@ class TCDvis(QMainWindow):
                 self._actors['tcddir'] = cubetk.quiv3d(tmp_cube, 
                                                scale=self._default["quiver"]["scale"]/5,
                                                subsample_factor=100,
-                                               glyphmode='cone')
+                                               glyphmode='cone',
+                                               clip_bounds=self._default["vfield"]["clip_bounds"] if self._default["vfield"]["enable_clipping"] else None)
             
             # Add animated particles if enabled
             if self._default["vfield"]["animate_particles"]:
@@ -1313,7 +1328,8 @@ class TCDvis(QMainWindow):
             tmp_cube.loc2wrd *=  PHYSFACT.bohr2ang
             self._actors['tcd'] = cubetk.quiv3d(tmp_cube, 
                                                scale=self._default["quiver"]["scale"],
-                                               subsample_factor=self._default["quiver"]["subsample"])
+                                               subsample_factor=self._default["quiver"]["subsample"],
+                                               clip_bounds=self._default["quiver"]["clip_bounds"] if self._default["quiver"]["enable_clipping"] else None)
         elif prop_cur == "moe":
             if self._moltype == 'ele':
                 vec = tmp_cube.integrate() / self._fchk.get_exeng(self._activest)
