@@ -124,7 +124,8 @@ def simp_proj(cubdat1, axis, grid=False):
     return (to_grid(vec_tmp, ax_dim), to_grid(box_tmp, ax_dim))
 
 
-def draw_mol2d(ax_out, coord, atnum, axis, scale, conmat=None, to_bohr=False):
+def draw_mol2d(ax_out, coord, atnum, axis, scale,
+               conmat=None, to_bohr=False, vollimit=None):
     """
     Draw the molecule in 2D as balls and sticks
     """
@@ -136,26 +137,50 @@ def draw_mol2d(ax_out, coord, atnum, axis, scale, conmat=None, to_bohr=False):
         cscl = 1.*PHYSFACT.bohr2ang
     ithx, ith_one, ith_two = check_ax(axis)
 
+    inside_atom = np.ones(len(coord), dtype=bool)
+    if vollimit is not None:
+        if len(vollimit) != 6:
+            raise ValueError(
+                "vollimit must contain [xmin, xmax, ymin, ymax, zmin, zmax]"
+            )
+        xmin, xmax, ymin, ymax, zmin, zmax = vollimit
+        for i_a, crd in enumerate(coord):
+            inside_atom[i_a] = (
+                (xmin is None or crd[0] >= xmin) and
+                (xmax is None or crd[0] <= xmax) and
+                (ymin is None or crd[1] >= ymin) and
+                (ymax is None or crd[1] <= ymax) and
+                (zmin is None or crd[2] >= zmin) and
+                (zmax is None or crd[2] <= zmax)
+            )
+
     if conmat:
         for bond in conmat:
             i_a, j_a = bond
             x_crd = [coord[i_a-1][ith_one]*cscl, coord[j_a-1][ith_one]*cscl]
             y_crd = [coord[i_a-1][ith_two]*cscl, coord[j_a-1][ith_two]*cscl]
-            ax_out.plot(x_crd, y_crd, c='#555555', lw=2.5 / scale[1], zorder=1)
+            balpha = 1.0
+            if not inside_atom[i_a-1] or not inside_atom[j_a-1]:
+                balpha = 0.3
+            ax_out.plot(x_crd, y_crd, c='#555555', lw=2.5 / scale[1],
+                        zorder=1, alpha=balpha)
     # c_sorted = sorted(ax_val.items(), key=operator.itemgetter(1), reverse=True)
     ax_val = {}
     for i_a, crd in enumerate(coord):
         ax_val[i_a] = crd[ithx]
     c_sorted = sorted(ax_val.items(), key=operator.itemgetter(1))
-    x_crd, y_crd, col, rad = [], [], [], []
+    x_crd, y_crd, col, edge_col, rad = [], [], [], [], []
     for i_a, xval in c_sorted:
         del xval
         x_crd.append(coord[i_a][ith_one]*cscl)
         y_crd.append(coord[i_a][ith_two]*cscl)
         ian_l = int(atnum[i_a])
         rad.append(AT_RAD[ian_l]*rscl/scale[0])
-        col.append(tuple(AT_COL2[ian_l]))
-    ax_out.scatter(x_crd, y_crd, s=rad, c=col, edgecolors='#353535', zorder=2)
+        alpha = 1.0 if inside_atom[i_a] else 0.3
+        at_col = tuple(AT_COL2[ian_l])
+        col.append((at_col[0], at_col[1], at_col[2], alpha))
+        edge_col.append((53/255, 53/255, 53/255, alpha))
+    ax_out.scatter(x_crd, y_crd, s=rad, c=col, edgecolors=edge_col, zorder=2)
 
 
 def draw_nm2d(ax_out, coord, e_vec, axis, scal_f, to_bohr=False):
@@ -395,11 +420,14 @@ def stream2_plt(ax0, cubdat, axis, loops=False, background=True):
         ax0.add_collection(line)
     # Add the background representing the field magnitude
     if background:
-        ax0.imshow(norm, extent=[box2[0, :, :].min(),
+        _cmap = cm.get_cmap('Blues').copy()
+        _cmap.set_bad('white')
+        norm_masked = np.ma.masked_where(norm < 1e-8, norm)
+        ax0.imshow(norm_masked, extent=[box2[0, :, :].min(),
                                  box2[0, :, :].max(),
                                  box2[1, :, :].max(),
                                  box2[1, :, :].min()],
-                   interpolation='bilinear', cmap='Blues')
+                   interpolation='bilinear', cmap=_cmap)
 
     return(lengths, colors, lines)
 
@@ -424,11 +452,13 @@ def animated_stream(fig0, params, fname='test.gif', nfr=27, savegif=False):
 
 
 def quiver_plt(ax0, cubdat, axis, vscale,
-               filtred=False, col='black', alf=1):
+               filtred=False, col='black', alf=1, background=False):
     """
     TODO description
     """
     vec2, box2 = simp_proj(cubdat, axis)
+    ithx, ith_one, ith_two = check_ax(axis)
+    ax_dim = (cubdat.npts[ith_one], cubdat.npts[ith_two])
     if filtred:
         vec_norm = np.sqrt((vec2 ** 2).sum(axis=0))
         # index = np.where(vec_norm > 5e-2)
@@ -441,6 +471,16 @@ def quiver_plt(ax0, cubdat, axis, vscale,
                       vec2[1, :], units='width',
                       scale=vscale, color=col, alpha=alf,
                       zorder=3)
+    if background:
+        vec_norm = (np.linalg.norm(vec2, axis=0)).reshape(ax_dim).T
+        _cmap = cm.get_cmap('Blues').copy()
+        _cmap.set_bad('white')
+        vec_norm_masked = np.ma.masked_where(vec_norm < 1e-4, vec_norm)
+        ax0.imshow(vec_norm_masked, extent=[box2[0, :].min(),
+                                 box2[0, :].max(),
+                                 box2[1, :].max(),
+                                 box2[1, :].min()],
+                   interpolation='bilinear', cmap=_cmap)
     return quiv
 
 
