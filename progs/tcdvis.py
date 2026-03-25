@@ -751,6 +751,20 @@ class TCDvis(QMainWindow):
 
     def _fieldstp(self):
         current_prop = self.prop.currentText().lower()
+
+        # Compute field bounding box for clip-plane preview in setup dialogs
+        try:
+            _tcd_bnd = self._fchk.get_tcd(self._activest)
+            _orig = _tcd_bnd.loc2wrd[:3, 3]
+            _spac = np.diag(_tcd_bnd.loc2wrd[:3, :3])
+            _ends = _orig + (np.array(_tcd_bnd.npts) - 1) * _spac
+            _vtk_bounds = (
+                float(min(_orig[0], _ends[0])), float(max(_orig[0], _ends[0])),
+                float(min(_orig[1], _ends[1])), float(max(_orig[1], _ends[1])),
+                float(min(_orig[2], _ends[2])), float(max(_orig[2], _ends[2])),
+            )
+        except Exception:
+            _vtk_bounds = None
         
         if current_prop == "streamlines":
             # Handle streamlines setup dialog
@@ -771,7 +785,10 @@ class TCDvis(QMainWindow):
                                              sampling_method=self._default["vfield"]["sampling_method"],
                                              scalevdw=self._default["vfield"]["scalevdw"],
                                              enable_clipping=self._default["vfield"]["enable_clipping"],
-                                             clip_bounds=self._default["vfield"]["clip_bounds"])
+                                             clip_bounds=self._default["vfield"]["clip_bounds"],
+                                             vtk_renderer=self.ren,
+                                             vtk_render_window=self.vtkWidget.GetRenderWindow(),
+                                             vtk_scene_bounds=_vtk_bounds)
             fieldprm.exec()
             # Update the default values
             self._default["vfield"]["vfmax"] = fieldprm._vfmax
@@ -892,7 +909,10 @@ class TCDvis(QMainWindow):
             quiverprm = QuiverSetupDialog(scale=self._default["quiver"]["scale"],
                                          subsamp=self._default["quiver"]["subsample"],
                                          enable_clipping=self._default["quiver"]["enable_clipping"],
-                                         clip_bounds=self._default["quiver"]["clip_bounds"])
+                                         clip_bounds=self._default["quiver"]["clip_bounds"],
+                                         vtk_renderer=self.ren,
+                                         vtk_render_window=self.vtkWidget.GetRenderWindow(),
+                                         vtk_scene_bounds=_vtk_bounds)
             quiverprm.exec()
             # Update the default values
             self._default["quiver"]["scale"] = quiverprm._scale

@@ -160,6 +160,101 @@ def apply_spatial_clipping(grid_data: vtk.vtkImageData,
     return extract_filter.GetOutput()
 
 
+def create_clip_plane_actors(
+    scene_bounds: tp.Tuple[float, float, float, float, float, float],
+    initial_values: tp.Dict[str, float],
+) -> tp.Tuple[tp.Dict[str, "vtk.vtkActor"], tp.Dict[str, "vtk.vtkPlaneSource"]]:
+    """Create six semi-transparent plane actors for clip-bound preview.
+
+    One actor per bound key (``'xmin'``, ``'xmax'``, ``'ymin'``, ``'ymax'``,
+    ``'zmin'``, ``'zmax'``).  Yellow = min bound, Blue = max bound.
+    All actors are created with ``VisibilityOff()``.
+
+    Args:
+        scene_bounds: ``(xmin, xmax, ymin, ymax, zmin, zmax)`` of the VTK scene
+                      in Bohr, used as the extent of each plane.
+        initial_values: mapping from bound key to initial coordinate value;
+                        should cover all six keys.
+
+    Returns:
+        ``(actors, sources)`` — two dicts keyed by bound string, holding the
+        ``vtkActor`` and ``vtkPlaneSource`` respectively.
+    """
+    bnd = scene_bounds
+    colors = {
+        'xmin': (1.0, 1.0, 0.0), 'xmax': (0.0, 0.0, 1.0),
+        'ymin': (1.0, 1.0, 0.0), 'ymax': (0.0, 0.0, 1.0),
+        'zmin': (1.0, 1.0, 0.0), 'zmax': (0.0, 0.0, 1.0),
+    }
+    actors: tp.Dict[str, vtk.vtkActor] = {}
+    sources: tp.Dict[str, vtk.vtkPlaneSource] = {}
+
+    for key in ('xmin', 'xmax', 'ymin', 'ymax', 'zmin', 'zmax'):
+        source = vtk.vtkPlaneSource()
+        source.SetResolution(10, 10)
+        val = initial_values[key]
+        axis = key[0]
+        if axis == 'x':
+            source.SetOrigin(val, bnd[2], bnd[4])
+            source.SetPoint1(val, bnd[3], bnd[4])
+            source.SetPoint2(val, bnd[2], bnd[5])
+        elif axis == 'y':
+            source.SetOrigin(bnd[0], val, bnd[4])
+            source.SetPoint1(bnd[1], val, bnd[4])
+            source.SetPoint2(bnd[0], val, bnd[5])
+        else:  # 'z'
+            source.SetOrigin(bnd[0], bnd[2], val)
+            source.SetPoint1(bnd[1], bnd[2], val)
+            source.SetPoint2(bnd[0], bnd[3], val)
+        source.Update()
+
+        mapper = vtk.vtkPolyDataMapper()
+        mapper.SetInputConnection(source.GetOutputPort())
+        actor = vtk.vtkActor()
+        actor.SetMapper(mapper)
+        r, g, b = colors[key]
+        actor.GetProperty().SetColor(r, g, b)
+        actor.GetProperty().SetOpacity(0.35)
+        actor.GetProperty().LightingOff()
+        actor.VisibilityOff()
+
+        sources[key] = source
+        actors[key] = actor
+
+    return actors, sources
+
+
+def move_clip_plane(
+    source: "vtk.vtkPlaneSource",
+    key: str,
+    val: float,
+    scene_bounds: tp.Tuple[float, float, float, float, float, float],
+) -> None:
+    """Update the geometry of a single clip-plane source.
+
+    Args:
+        source: the ``vtkPlaneSource`` to update.
+        key: bound key (``'xmin'``, ``'xmax'``, ``'ymin'``, etc.).
+        val: new coordinate value in Bohr.
+        scene_bounds: ``(xmin, xmax, ymin, ymax, zmin, zmax)`` of the scene.
+    """
+    bnd = scene_bounds
+    axis = key[0]
+    if axis == 'x':
+        source.SetOrigin(val, bnd[2], bnd[4])
+        source.SetPoint1(val, bnd[3], bnd[4])
+        source.SetPoint2(val, bnd[2], bnd[5])
+    elif axis == 'y':
+        source.SetOrigin(bnd[0], val, bnd[4])
+        source.SetPoint1(bnd[1], val, bnd[4])
+        source.SetPoint2(bnd[0], val, bnd[5])
+    else:  # 'z'
+        source.SetOrigin(bnd[0], bnd[2], val)
+        source.SetPoint1(bnd[1], bnd[2], val)
+        source.SetPoint2(bnd[0], bnd[3], val)
+    source.Modified()
+
+
 def fillcubeimage(data, vec=True, logscale=False, aslist=False):
     """
     Fills a vtkImageData object
