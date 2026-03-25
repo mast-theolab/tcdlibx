@@ -420,11 +420,14 @@ def stream2_plt(ax0, cubdat, axis, loops=False, background=True):
         ax0.add_collection(line)
     # Add the background representing the field magnitude
     if background:
-        ax0.imshow(norm, extent=[box2[0, :, :].min(),
+        _cmap = cm.get_cmap('Blues').copy()
+        _cmap.set_bad('white')
+        norm_masked = np.ma.masked_where(norm < 1e-8, norm)
+        ax0.imshow(norm_masked, extent=[box2[0, :, :].min(),
                                  box2[0, :, :].max(),
                                  box2[1, :, :].max(),
                                  box2[1, :, :].min()],
-                   interpolation='bilinear', cmap='Blues')
+                   interpolation='bilinear', cmap=_cmap)
 
     return(lengths, colors, lines)
 
@@ -470,11 +473,14 @@ def quiver_plt(ax0, cubdat, axis, vscale,
                       zorder=3)
     if background:
         vec_norm = (np.linalg.norm(vec2, axis=0)).reshape(ax_dim).T
-        ax0.imshow(vec_norm, extent=[box2[0, :].min(),
+        _cmap = cm.get_cmap('Blues').copy()
+        _cmap.set_bad('white')
+        vec_norm_masked = np.ma.masked_where(vec_norm < 1e-4, vec_norm)
+        ax0.imshow(vec_norm_masked, extent=[box2[0, :].min(),
                                  box2[0, :].max(),
                                  box2[1, :].max(),
                                  box2[1, :].min()],
-                   interpolation='bilinear', cmap='Blues')
+                   interpolation='bilinear', cmap=_cmap)
     return quiv
 
 

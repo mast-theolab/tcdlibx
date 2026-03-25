@@ -22,7 +22,6 @@ from estampes.data.physics import PHYSFACT
 import tcdlibx.calc.cube_manip as cb
 import tcdlibx.graph.cube_graphic as cbplt
 from tcdlibx.utils.color_out import Colors
-import tcdlibx.io.fchk_io as fio
 # import variabiles
 from tcdlibx.utils.mol_data import ELEMENTS # , AT_COL2, AT_RAD
 
@@ -62,8 +61,8 @@ def build_parser():
                       help='Lower bound along z for the current vectors')
     draw.add_argument('--zmax', type=float,
                       help='Upper bound along z for the current vectors')
-    draw.add_argument('--notitle', action='store_true',
-                      help='do not print title')
+    draw.add_argument('--printTitle', type=str, default=None,
+                      help='Print this title')
     draw.add_argument('--setlimit',
                       help='Set the axis limits for a 2d plot as \
                       comma separated values: [xmin,xmax,ymix,ymax]')
@@ -75,6 +74,8 @@ def build_parser():
                       default='quiver',
                       help='''Type of representation of vecfield:
                       quiver/streamline/animatedstreamline''')
+    draw.add_argument('--quivbkg', action='store_true',
+                      help='''Quiver background based on norm of the vector field''') 
     draw.add_argument('--figext', type=str,
                       choices=('pdf', 'eps', 'png'),
                       default='pdf',
@@ -140,9 +141,8 @@ Coordinates (in Bohr)
     
     vec2, box2 = cbplt.simp_proj(cubdat, OPTS.axis)
     fig0, ax0 = plt.subplots()
-    if not OPTS.notitle:
-        ax0.set_title('Electronic Transition Current Density')
-    
+    if OPTS.printTitle:
+        ax0.set_title('{}'.format(OPTS.printTitle))
     if OPTS.setlimit:
         tmp = [float(s) for s in OPTS.setlimit[1:-1].split(',')]
     elif OPTS.symplot:
@@ -154,10 +154,12 @@ Coordinates (in Bohr)
     else:
         tmp = [box2[0, 0], box2[0, -1], box2[1, 0], box2[1, -1]]
     
+    _, x_ax, y_ax = cbplt.check_ax(OPTS.axis)
     ax0.set_xlim(tmp[0:2])
     ax0.set_ylim(tmp[2:4])
-    ax0.set_xlabel('Bohr')
-    ax0.set_ylabel('Bohr')
+    label = ['x', 'y', 'z']
+    ax0.set_xlabel(r'$\mathit{{{}}}$ axis / Bohr'.format(label[x_ax]))
+    ax0.set_ylabel(r'$\mathit{{{}}}$ axis / Bohr'.format(label[y_ax]))
     
     AT_BONDS = cbplt.get_connect(cubdat.ian, cubdat.crd)
     # Draw molecule
@@ -166,7 +168,10 @@ Coordinates (in Bohr)
     
     # Draw current density vectors
     if OPTS.type == 'quiver':
-        QUIV = cbplt.quiver_plt(ax0, cubdat, OPTS.axis, OPTS.vscale)
+        bkg = False
+        if OPTS.quivbkg:
+            bkg = True
+        QUIV = cbplt.quiver_plt(ax0, cubdat, OPTS.axis, OPTS.vscale, background=bkg)
         fig0.savefig(os.path.join(resfolder, 'quiv2D_axis{}.{}'.format(OPTS.axis, OPTS.figext)))
     elif OPTS.type == 'stream':
         STRM = cbplt.stream_plt(ax0, cubdat, OPTS.axis)

@@ -119,12 +119,13 @@ def build_parser():
                       help='Lower bound along z for the current vectors')
     cube.add_argument('--zmax', type=float,
                       help='Upper bound along z for the current vectors')
-    cube.add_argument('--saveSignedCube', action='store_true',
-                      help='Save the last computed cube')
+    # cube.add_argument('--saveSignedCube', action='store_true',
+    #                   help='Save the last computed cube')
     cube.add_argument('--printVec', action='store_true',
                       help='print EDTM and MDTM')
-    cube.add_argument('--matchEDTM', action='store_true',
-                      help='Rotate the cube data set such as EDTM lies on the x axis')
+    # BUG to befixed
+    # cube.add_argument('--matchEDTM', action='store_true',
+    #                   help='Rotate the cube data set such as EDTM lies on the x axis')
     # PARTITIONING DATA
     # 
     part = par.add_argument_group('Partitioning Cube parameters')
@@ -244,43 +245,43 @@ Coordinates (in Bohr)
     # BUG
     if OPTS.xmin or OPTS.xmax or OPTS.ymin or \
        OPTS.ymax or OPTS.zmin or OPTS.zmax:
-        vec = cbplt.set_subgrid(cubdat, OPTS.xmin,
-                                OPTS.xmax, OPTS.ymin,
-                                OPTS.ymax, OPTS.zmin,
-                                OPTS.zmax)
+        cubdat.cube = cbplt.set_subgrid(cubdat, OPTS.xmin,
+                                        OPTS.xmax, OPTS.ymin,
+                                        OPTS.ymax, OPTS.zmin,
+                                        OPTS.zmax)
 
     # DEBUG
-    if OPTS.printVec or OPTS.saveSignedCube \
-       or OPTS.matchEDTM:
-        cubdat = cb.VtcdData(cubdat)
-        mu_state = cubdat.mu_integrate()
-        if not OPTS.matchEDTM:
-            mg_state = cubdat.mag_integrate()
-        if OPTS.printVec:
-            dcube = cb.CubeData()
-            dcube.natoms = 0
-            dcube.origin = np.array([0., 0., 0.])
-            dcube.npts = [2, 2, 2]
-            dcube.nval = 3
-            dcube.step = np.array([[1, 0, 0],
-                                   [0, 1, 0],
-                                   [0, 0, 1]])
-            dcube.cube = np.zeros((3, 8))
-            dcube.cube[:, 0] = mu_state
-            cb.print_cube(dcube, 'ELC', OPTS.vibstate)
-            dcube.cube[:, 0] = mg_state
-            cb.print_cube(dcube, 'MAG', OPTS.vibstate)
+    # if OPTS.printVec or OPTS.saveSignedCube \
+    #    or OPTS.matchEDTM:
+    #     cubdat = cb.VtcdData(cubdat)
+    #     mu_state = cubdat.mu_integrate()
+    #     if not OPTS.matchEDTM:
+    #         mg_state = cubdat.mag_integrate()
+    #     if OPTS.printVec:
+    #         dcube = cb.CubeData()
+    #         dcube.natoms = 0
+    #         dcube.origin = np.array([0., 0., 0.])
+    #         dcube.npts = [2, 2, 2]
+    #         dcube.nval = 3
+    #         dcube.step = np.array([[1, 0, 0],
+    #                                [0, 1, 0],
+    #                                [0, 0, 1]])
+    #         dcube.cube = np.zeros((3, 8))
+    #         dcube.cube[:, 0] = mu_state
+    #         cb.print_cube(dcube, 'ELC', OPTS.vibstate)
+    #         dcube.cube[:, 0] = mg_state
+    #         cb.print_cube(dcube, 'MAG', OPTS.vibstate)
 
     if OPTS.axis:
-        if OPTS.matchEDTM:
-            # BUG
-            # the cube and grind has been rotated
-            RMAT = cubdat.rotate(mu_state)
-            for ith in range(len(mol['crd'])):
-                mol['crd'][ith] = list(np.dot(RMAT, mol['crd'][ith]))
-                all_nmodes[int(idvstate-1),
-                           ith*3:ith*3+3] = np.dot(RMAT, all_nmodes[int(idvstate-1),
-                                                                    ith*3:ith*3+3])
+        # if OPTS.matchEDTM:
+        #     # BUG
+        #     # the cube and grind has been rotated
+        #     RMAT = cubdat.rotate(mu_state)
+        #     for ith in range(len(mol['crd'])):
+        #         mol['crd'][ith] = list(np.dot(RMAT, mol['crd'][ith]))
+        #         all_nmodes[int(idvstate-1),
+        #                    ith*3:ith*3+3] = np.dot(RMAT, all_nmodes[int(idvstate-1),
+        #                                                             ith*3:ith*3+3])
 
         fig0, ax0 = plt.subplots()
         _, x_ax, y_ax = cbplt.check_ax(OPTS.axis)
@@ -304,7 +305,7 @@ Coordinates (in Bohr)
         ax0.set_xlabel(r'$\mathit{{{}}}$ axis / Bohr'.format(label[x_ax]))
         ax0.set_ylabel(r'$\mathit{{{}}}$ axis / Bohr'.format(label[y_ax]))
         cbplt.draw_mol2d(ax0, cubdat.crd, cubdat.ian, OPTS.axis, SCF,
-                         conmat=AT_BONDS, to_bohr=True)
+                         conmat=AT_BONDS, to_bohr=True, vollimit=[OPTS.xmin, OPTS.xmax, OPTS.ymin, OPTS.ymax, OPTS.zmin, OPTS.zmax])
         if OPTS.printNM:
             cbplt.draw_nm2dcw(ax0, cubdat.crd, all_nmodes[int(idvstate-1)],
                             # OPTS.axis, OPTS.scaleNM, to_bohr=True)
@@ -325,10 +326,10 @@ Coordinates (in Bohr)
                                           'stream2D.{}'.format(OPTS.figext)))
         plt.close()
 
-    if OPTS.saveSignedCube:
-        VEC1, VEC2 = cb.mask_cube(cubdat, mu_state)
-        cb.print_cube(cubdat, 'Plus', OPTS.vibstate, vec_pr=VEC1)
-        cb.print_cube(cubdat, 'Minus', OPTS.vibstate, vec_pr=VEC2)
+    #if OPTS.saveSignedCube:
+    #    VEC1, VEC2 = cb.mask_cube(cubdat, mu_state)
+    #    cb.print_cube(cubdat, 'Plus', OPTS.vibstate, vec_pr=VEC1)
+    #    cb.print_cube(cubdat, 'Minus', OPTS.vibstate, vec_pr=VEC2)
 
 
 if __name__ == '__main__':
