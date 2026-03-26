@@ -655,6 +655,8 @@ class QuiverSetupDialog(QDialog):
     def __init__(self,
                  scale: float,
                  subsamp: int,
+                 lower: float = 0.0001,
+                 upper: float = 0.01,
                  parent: tp.Optional[tp.Union[QDialog, None]] = None) -> None:
         """ initialize the dialog. Requires a dictionary with the parameters,
             the maximum norm value in the field and optionally a parent dialog
@@ -662,11 +664,15 @@ class QuiverSetupDialog(QDialog):
         Args:
             scale (float): scaling factor for arrows
             nseeds (int): Subsampling of the grid for arrows
+            lower (float): lower bound to filter arrows (vectors below this norm are hidden)
+            upper (float): upper bound to filter arrows (vectors above this norm are clamped)
             parent (tp.Optional[tp.Union[QDialog, None]]): Not required
         """
         super().__init__(parent)
         self._scale = scale
         self._subsamp = subsamp
+        self._lower = lower
+        self._upper = upper
         self.setWindowTitle("Quiver Setup Dialog")
         self.vlay = QVBoxLayout()
         grid = QGridLayout()
@@ -682,6 +688,20 @@ class QuiverSetupDialog(QDialog):
         grid.addWidget(message, 2, 0)
         grid.addLayout(self._subsampline._hlay, 3, 0)
 
+        _bnd_validator = QDoubleValidator()
+        _bnd_validator.setLocale(QLocale.c())
+        message = QLabel("Lower bound (hide vectors below this norm):")
+        self._lowerline = EditDoubleLine("Lower", lower, _bnd_validator)
+        grid.addWidget(message, 4, 0)
+        grid.addLayout(self._lowerline._hlay, 5, 0)
+
+        _bnd_validator2 = QDoubleValidator()
+        _bnd_validator2.setLocale(QLocale.c())
+        message = QLabel("Upper bound (clamp vectors above this norm):")
+        self._upperline = EditDoubleLine("Upper", upper, _bnd_validator2)
+        grid.addWidget(message, 6, 0)
+        grid.addLayout(self._upperline._hlay, 7, 0)
+
         QBtn = QDialogButtonBox.Ok | QDialogButtonBox.Cancel 
 
         self.buttonBox = QDialogButtonBox(QBtn)
@@ -696,6 +716,8 @@ class QuiverSetupDialog(QDialog):
     def _setvals(self):
         self._scale = self._scalemol._getvalue()
         self._subsamp = self._subsampline._getvalue()
+        self._lower = self._lowerline._getvalue()
+        self._upper = self._upperline._getvalue()
 
 
 class MoleculeConfigDialog(QDialog):

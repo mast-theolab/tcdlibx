@@ -19,6 +19,7 @@ import matplotlib.pyplot as plt
 from estampes.data.physics import PHYSFACT
 import tcdlibx.calc.cube_manip as cb
 import tcdlibx.graph.cube_graphic as cbplt
+from tcdlibx.graph.helpers import molecular_voxels
 from tcdlibx.utils.custom_except import NoValidData
 import tcdlibx.io.fchk_io as fio
 # import service file
@@ -97,7 +98,19 @@ def build_parser():
                       choices=('pdf', 'eps', 'png'),
                       default='pdf',
                       help='Figure extension')
-    # Molecule Drawing Parameters
+    # Quiver parameters
+    quiver = par.add_argument_group('Quiver Parameters')
+    quiver.add_argument('--quivbkg', action='store_true',
+                      help='''Quiver background based on norm of the vector field''')
+    quiver.add_argument('--filtnuclei', action='store_true',
+                      help='''Filter out the current density vectors that are too close to the nuclei''')
+    quiver.add_argument('--qlower', type=float, default=0.0001,
+                      help='''Lower bound for the vector field values''')
+    quiver.add_argument('--qupper', type=float, default=0.01,
+                      help='''Upper bound for the vector field values''')
+    quiver.add_argument('--subsample', type=int, default=1,
+                      help='''Show only every nth vector (default: 1, no subsampling)''')
+    
     molecule = par.add_argument_group('Drawing Molecule Parameters')
     molecule.add_argument('--scaleNuc', type=float, default=1.0,
                           help='''Enter the scaling factor for Nucleus circles''')
@@ -229,6 +242,9 @@ Coordinates (in Bohr)
     except OSError:
         print('{} file does not exist. exit'.format(OPTS.cubefile))
         sys.exit()
+    if OPTS.filtnuclei:
+        _mvox = molecular_voxels(cubdat, minthresh=0., maxthresh=0.15)
+        cubdat.cube[:, _mvox] = 0. 
     cubdat.make_box()
     AT_BONDS = cbplt.get_connect(cubdat.ian, cubdat.crd)
 
@@ -311,7 +327,12 @@ Coordinates (in Bohr)
                             # OPTS.axis, OPTS.scaleNM, to_bohr=True)
                               cubdat.ian, OPTS.axis, OPTS.scaleNM, to_bohr=True)
         if OPTS.type == 'quiver':
-            QUIV = cbplt.quiver_plt(ax0, cubdat, OPTS.axis, OPTS.vscale)
+            clim = [OPTS.qlower, OPTS.qupper]
+            bkg = False
+            if OPTS.quivbkg:
+                bkg = True
+            QUIV = cbplt.quiver_plt(ax0, cubdat, OPTS.axis, OPTS.vscale, background=bkg,
+                                clim=clim, subsample=OPTS.subsample)
             fig0.savefig(os.path.join(ressubfolder, 'quiv2D.{}'.format(OPTS.figext)))
         elif OPTS.type == 'stream':
             STRM = cbplt.stream_plt(ax0, cubdat, OPTS.axis)

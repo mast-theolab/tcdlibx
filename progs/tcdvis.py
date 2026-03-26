@@ -103,7 +103,9 @@ class TCDvis(QMainWindow):
                                     'num_particles': 15,
                                     'particle_type': 'sphere'},
                          'quiver': {'scale': 100,
-                                   'subsample': 5},
+                                   'subsample': 5,
+                                   'lower': 0.0001,
+                                   'upper': 0.01},
                          'nmconfig': {'invert_phase': False,
                                      'scale_factor': 1.0,
                                      'color': (0.0, 0.0, 1.0)},
@@ -881,11 +883,15 @@ class TCDvis(QMainWindow):
         elif current_prop == "quiver":
             # Handle quiver setup dialog
             quiverprm = QuiverSetupDialog(scale=self._default["quiver"]["scale"],
-                                         subsamp=self._default["quiver"]["subsample"])
+                                         subsamp=self._default["quiver"]["subsample"],
+                                         lower=self._default["quiver"]["lower"],
+                                         upper=self._default["quiver"]["upper"])
             quiverprm.exec()
             # Update the default values
             self._default["quiver"]["scale"] = quiverprm._scale
             self._default["quiver"]["subsample"] = quiverprm._subsamp
+            self._default["quiver"]["lower"] = quiverprm._lower
+            self._default["quiver"]["upper"] = quiverprm._upper
             
             # Redraw quiver if it exists
             if 'tcd' in self._actors:
@@ -1311,7 +1317,9 @@ class TCDvis(QMainWindow):
             mask_index = filtervecatom(tmp_cube, 0.3)
             tmp_cube.cube[:, mask_index] = 0
             tmp_cube.loc2wrd *=  PHYSFACT.bohr2ang
-            self._actors['tcd'] = cubetk.quiv3d(tmp_cube, 
+            self._actors['tcd'] = cubetk.quiv3d(tmp_cube,
+                                               lower=self._default["quiver"]["lower"],
+                                               upper=self._default["quiver"]["upper"],
                                                scale=self._default["quiver"]["scale"],
                                                subsample_factor=self._default["quiver"]["subsample"])
         elif prop_cur == "moe":
