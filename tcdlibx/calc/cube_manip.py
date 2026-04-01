@@ -869,9 +869,9 @@ class VtcdData(VecCubeData):
         # TODO prefactor
         poligon = self.get_voxvol()
         res = self._calc_rot(mask, origin=origin)
-        # m = -ie/2c sum(cross(r,J))
+        # m = -1/2 * sum(cross(r,J)) in atomic units
         # integrated = res.sum(axis=1) * poligon / (2 * 137) * -1
-        integrated = res.sum(axis=1) * poligon * -1/4 #
+        integrated = res.sum(axis=1) * poligon * -1/2
         return integrated
 
     def mag_integrate_test(self, mask=None):
@@ -957,7 +957,7 @@ class VtcdData(VecCubeData):
                 nuc = self.mg_nuc()
                 vec += nuc
             rot = False
-            pre_fc = 0.5
+            pre_fc = 0.25
         else:
             vec = self.mu_integrate()
             if nucl:
@@ -1135,7 +1135,7 @@ class AimCubeData(VecCubeData):
             # This is VTCD data, use specialized integration
             poligon = self.get_voxvol()
             res = self._calc_rot(mask, origin=origin)
-            integrated = res.sum(axis=1) * poligon * -1 * 1/4
+            integrated = res.sum(axis=1) * poligon * -1/2
             return integrated
         else:
             # Regular rotational integration

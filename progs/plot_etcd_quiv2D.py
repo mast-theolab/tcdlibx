@@ -27,8 +27,6 @@ from tcdlibx.utils.color_out import Colors
 from tcdlibx.utils.mol_data import ELEMENTS # , AT_COL2, AT_RAD
 
 PROGNAME = os.path.basename(sys.argv[0])
-NSTEP_BOX = 1
-SCALE_ARROW = None
 
 
 def build_parser():
@@ -48,8 +46,6 @@ def build_parser():
                       help='Axis for the projection')
     draw.add_argument('--vscale', type=float, default=5.,
                       help='Overall scaling factor for the arrows')
-    draw.add_argument('-g', '--grid', type=int,
-                      help='Sets the step for the grid construction')
     draw.add_argument('--xmin', type=float,
                       help='Lower bound along x for the current vectors')
     draw.add_argument('--xmax', type=float,
@@ -114,10 +110,6 @@ if __name__ == '__main__':
         print(cp.printred('ERROR: cube file {} does not exist'.format(OPTS.cubefile)))
         sys.exit()
     # Set grid step
-    if OPTS.grid:
-        ngrdstp = OPTS.grid
-    else:
-        ngrdstp = NSTEP_BOX
     # Get molecule information
     # Parse and load cube data
     print('Loading molecular and transition current density from cube file...')
