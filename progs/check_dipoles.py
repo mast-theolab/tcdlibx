@@ -9,7 +9,7 @@ from estampes.data.physics import phys_fact
 from tcdlibx.calc.cube_manip import VecCubeData, VtcdData, CubeData, cube_parser
 from tcdlibx.graph.helpers import EleMolecule, VibMolecule
 from tcdlibx.io.estp_io import get_elemol, get_vibmol
-from tcdlibx.utils.conversion_units import edip_cgs, mdip_cgs, ele_mdip_cgs, ele_edip_cgs
+from tcdlibx.utils.conversion_units import edip_cgs, mdip_cgs, ele_mdip_cgs, ele_edip_cgs, MWQ2q
 
 # FIXME: check the exceptions? leave it to the gui? 
 def open_fchk(fname: str) -> tp.Union[EleMolecule, VibMolecule]:
@@ -81,14 +81,15 @@ def main():
     else:
         # convert velocity edtm to length
         cub_dip = list(cub_dip)
-        print(cub_dip[0], fchk._moldata['freq'][state])
-        cub_dip[0] = cub_dip[0] / (fchk._moldata['freq'][state] /phys_fact("au2cm1"))
-        cub_dip[0] = cub_dip[0] / (np.sqrt(fchk._moldata['rmas'][state]*1822.888486209))  # convert to mass-weighted
+        # print(cub_dip[0], fchk._moldata['freq'][state])
+        # cub_dip[0] = cub_dip[0] / np.sqrt(fchk._moldata['freq'][state] /phys_fact("au2cm1"))
+        # cub_dip[0] = cub_dip[0] / (np.sqrt(fchk._moldata['rmas'][state])) / MWQ2q # *1822.888486209))  # convert to mass-weighted
+        # cub_dip[1] = cub_dip[1] / (np.sqrt(fchk._moldata['rmas'][state])) / MWQ2q # *1822.888486209))  # convert to mass-weighted
         fchk_dip_cgs = (edip_cgs(fchk_dip[0], fchk._moldata['freq'][state]), mdip_cgs(fchk_dip[1], fchk._moldata['freq'][state]))
-        fchk_dip_tot_cgs = (edip_cgs(fchk_dip_tot[0], fchk._moldata['freq'][state]), mdip_cgs(fchk_dip_tot[1], fchk._moldata['freq'][state]))
+        # fchk_dip_tot_cgs = (edip_cgs(fchk_dip_tot[0], fchk._moldata['freq'][state]), mdip_cgs(fchk_dip_tot[1], fchk._moldata['freq'][state]))
         cub_dip_cgs = (edip_cgs(cub_dip[0], fchk._moldata['freq'][state]), mdip_cgs(cub_dip[1], fchk._moldata['freq'][state]))
 
-    print(f"DS: {np.dot(fchk_dip_tot_cgs[0], fchk_dip_tot_cgs[0])} RS: {np.dot(fchk_dip_tot_cgs[0], fchk_dip_tot_cgs[1])}")
+    # print(f"DS: {np.dot(fchk_dip_tot_cgs[0], fchk_dip_tot_cgs[0])} RS: {np.dot(fchk_dip_tot_cgs[0], fchk_dip_tot_cgs[1])}")
 
 
     print(f"fchk EDTM: {fchk_dip[0][0]:10.5f}{fchk_dip[0][1]:10.5f}{fchk_dip[0][2]:10.5f}")

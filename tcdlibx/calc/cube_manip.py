@@ -939,7 +939,7 @@ class VtcdData(VecCubeData):
         on the electric dipole transition moment
         params nucl: include the nuclear contribution
         """
-        if typ not in ['moe', 'eom', 'eoe']:
+        if typ not in ['moe', 'eom', 'eoe', 'mom']:
             raise NoValidData('VtcdData.proj_on_vec', 'not available')
         if typ == 'moe':
             vec = self.mu_integrate()
@@ -955,13 +955,22 @@ class VtcdData(VecCubeData):
                 vec += nuc
             rot = False
             pre_fc = 0.25
-        else:
+        elif typ == 'eoe':
             vec = self.mu_integrate()
             if nucl:
                 nuc = self.mu_nuc()
                 vec += nuc
             rot = False
+            pre_fc = 0.25
+        elif typ == 'mom':
+            vec = self.mag_integrate()
+            if nucl:
+                nuc = self.mg_nuc()
+                vec += nuc
+            rot = True
             pre_fc = 1
+        else:
+            raise NotImplementedError
         # *-1 is to match the direction of the vectors in the cube
         res = super(VtcdData, self).proj_on_vec(vec=vec*-1, rot=rot, cube=cube)
         if cube:
