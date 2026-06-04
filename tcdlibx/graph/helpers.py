@@ -553,6 +553,110 @@ def fibonacci_spiral_samples_on_unit_sphere(nb_samples, mode=0):
         j += 1
     return ss
 
+def write_molecule_pov(mol_myvtkactor: 'MyvtkActor', filename: str) -> None:
+    """Append molecule geometry as native POV-Ray sphere/cylinder primitives to an
+    existing .pov file produced by vtkPOVExporter.
+
+    Atoms are written as ``sphere {}`` objects and each bond as two
+    half-``cylinder {}`` objects (one per endpoint atom colour) so that
+    two-colour bonds are rendered correctly.  Colours and radii are taken
+    from ``estampes.data.atom.atomic_data`` (``rgb`` and ``rvdw`` fields).
+
+    Args:
+        mol_myvtkactor: MyvtkActor returned by fillmolecule / fillmolecule_custom.
+        filename: Path to the .pov file to append to.
+    """
+    _RGB_FALLBACK = (1.000, 0.078, 0.576)   # pink — for elements with rgb=None
+
+    def _atom_rgb(z: int) -> tuple:
+        rgb_int = atomic_data(int(z))[int(z)]['rgb']
+        if rgb_int is None:
+            return _RGB_FALLBACK
+        return tuple(c / 255.0 for c in rgb_int)
+
+    actor = mol_myvtkactor.actor
+    mapper = actor.GetMapper()
+    mol = mapper.GetInput()          # vtkMolecule with bonds (output of bond perceiver)
+    opacity = actor.GetProperty().GetOpacity()
+    transparency = max(0.0, 1.0 - opacity)
+    bond_radius = mapper.GetBondRadius()
+
+    # Atom radius type: 0=VDWRadius, 1=CovalentRadius, 2=UnitRadius
+    # For UnitRadius (liquorice sticks default) the scale factor IS the radius.
+    # For other types use per-element VDW radii from atomic_data (same formula
+    # as helpers.py: rvdw_angstrom / bohr2ang * scale_factor).
+    radius_type = mapper.GetAtomicRadiusType()
+    scale_factor = mapper.GetAtomicRadiusScaleFactor()
+
+    n_atoms = mol.GetNumberOfAtoms()
+    n_bonds = mol.GetNumberOfBonds()
+
+    # Collect per-atom data
+    atom_colors = []
+    atom_positions = []
+    atom_radii = []
+    for i in range(n_atoms):
+        atom = mol.GetAtom(i)
+        z = atom.GetAtomicNumber()
+        pos = atom.GetPosition()
+        atom_colors.append(_atom_rgb(z))
+        atom_positions.append((pos[0], pos[1], pos[2]))
+        if radius_type == 2:  # UnitRadius: scale factor is a direct radius value
+            atom_radii.append(scale_factor)
+        else:
+            # Use per-element VDW radius in Bohr, scaled — same as helpers.py
+            rvdw_bohr = atomic_data(int(z))[int(z)]['rvdw'] / PHYSFACT.bohr2ang
+            atom_radii.append(scale_factor * rvdw_bohr)
+
+    finish = "finish { ambient 0.3 diffuse 0.7 specular 0.4 roughness 0.05 phong 0.3 }"
+
+    with open(filename, 'a') as f:
+        f.write("\n// === Molecule atoms (native POV-Ray spheres) ===\n")
+        for i in range(n_atoms):
+            x, y, z = atom_positions[i]
+            r, g, b = atom_colors[i]
+            f.write(
+                f"sphere {{\n"
+                f"  <{x:.6f}, {y:.6f}, {z:.6f}>, {atom_radii[i]:.6f}\n"
+                f"  pigment {{ color rgbt <{r:.4f}, {g:.4f}, {b:.4f}, {transparency:.4f}> }}\n"
+                f"  {finish}\n"
+                f"}}\n"
+            )
+
+        f.write("\n// === Molecule bonds (native POV-Ray cylinders) ===\n")
+        for i in range(n_bonds):
+            if mol.GetBondOrder(i) == 0:
+                continue
+            bond = mol.GetBond(i)
+            a1 = bond.GetBeginAtomId()
+            a2 = bond.GetEndAtomId()
+            p1 = atom_positions[a1]
+            p2 = atom_positions[a2]
+            mid = ((p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2, (p1[2] + p2[2]) / 2)
+            r1, g1, b1 = atom_colors[a1]
+            r2, g2, b2 = atom_colors[a2]
+            # Half-cylinder coloured by atom 1
+            f.write(
+                f"cylinder {{\n"
+                f"  <{p1[0]:.6f}, {p1[1]:.6f}, {p1[2]:.6f}>,\n"
+                f"  <{mid[0]:.6f}, {mid[1]:.6f}, {mid[2]:.6f}>,\n"
+                f"  {bond_radius:.6f}\n"
+                f"  pigment {{ color rgbt <{r1:.4f}, {g1:.4f}, {b1:.4f}, {transparency:.4f}> }}\n"
+                f"  {finish}\n"
+                f"}}\n"
+            )
+            # Half-cylinder coloured by atom 2
+            f.write(
+                f"cylinder {{\n"
+                f"  <{mid[0]:.6f}, {mid[1]:.6f}, {mid[2]:.6f}>,\n"
+                f"  <{p2[0]:.6f}, {p2[1]:.6f}, {p2[2]:.6f}>,\n"
+                f"  {bond_radius:.6f}\n"
+                f"  pigment {{ color rgbt <{r2:.4f}, {g2:.4f}, {b2:.4f}, {transparency:.4f}> }}\n"
+                f"  {finish}\n"
+                f"}}\n"
+            )
+
+
 DEFAULT_PARAMETERS = {'isoval': {'iso': 0.01},
                          'vfield': {'vfmax': 1e2,
                                     'vfmin': 1e5,

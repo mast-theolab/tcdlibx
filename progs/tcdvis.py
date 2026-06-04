@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 
 # Local imports - tcdlibx package
 from tcdlibx.calc.cube_manip import VecCubeData, VtcdData, cube_parser
-from tcdlibx.graph.helpers import EleMolecule, VibMolecule, filtervecatom, sample_molecular_volume, DEFAULT_PARAMETERS
+from tcdlibx.graph.helpers import EleMolecule, VibMolecule, filtervecatom, sample_molecular_volume, DEFAULT_PARAMETERS, write_molecule_pov
 import tcdlibx.graph.cube_graphvtk as cubetk
 from tcdlibx.gui.dialogs import (
     SavePngDialog, SavePngSeriesDialog, StreamLineSetupDialog, TCDDialog, QuiverSetupDialog, SaveSceneDialog, ExportPOVDialog, NMConfigDialog, MoleculeConfigDialog
@@ -1601,7 +1601,9 @@ class TCDvis(QMainWindow):
     def export_scene_pov(self):
         dlg = ExportPOVDialog(parent=self)
         if dlg.exec() == ExportPOVDialog.Accepted:
-            dlg.export(self.vtkWidget.GetRenderWindow())
+            if dlg.export(self.vtkWidget.GetRenderWindow()):
+                if 'mol' in self._actors:
+                    write_molecule_pov(self._actors['mol'], dlg._fname)
 
     def _batch_operations(self):
         """Performs batch operations on multiple files using a configuration JSON file.

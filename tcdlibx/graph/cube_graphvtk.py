@@ -1452,6 +1452,8 @@ class StreamlineParticleAnimator:
             self.ren.GetRenderWindow().Render()
 
 
+
+
 def create_streamline_particles(renderer: vtk.vtkRenderer, 
                                polydata: vtk.vtkPolyData,
                                num_particles: int = 10,
