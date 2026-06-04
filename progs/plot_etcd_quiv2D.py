@@ -21,13 +21,12 @@ from estampes.data.physics import PHYSFACT
 
 import tcdlibx.calc.cube_manip as cb
 import tcdlibx.graph.cube_graphic as cbplt
+from tcdlibx.graph.helpers import molecular_voxels
 from tcdlibx.utils.color_out import Colors
 # import variabiles
 from tcdlibx.utils.mol_data import ELEMENTS # , AT_COL2, AT_RAD
 
 PROGNAME = os.path.basename(sys.argv[0])
-NSTEP_BOX = 1
-SCALE_ARROW = None
 
 
 def build_parser():
@@ -47,8 +46,6 @@ def build_parser():
                       help='Axis for the projection')
     draw.add_argument('--vscale', type=float, default=5.,
                       help='Overall scaling factor for the arrows')
-    draw.add_argument('-g', '--grid', type=int,
-                      help='Sets the step for the grid construction')
     draw.add_argument('--xmin', type=float,
                       help='Lower bound along x for the current vectors')
     draw.add_argument('--xmax', type=float,
@@ -74,12 +71,22 @@ def build_parser():
                       default='quiver',
                       help='''Type of representation of vecfield:
                       quiver/streamline/animatedstreamline''')
-    draw.add_argument('--quivbkg', action='store_true',
-                      help='''Quiver background based on norm of the vector field''') 
     draw.add_argument('--figext', type=str,
                       choices=('pdf', 'eps', 'png'),
                       default='pdf',
                       help='Figure extension')
+    # Quiver parameters
+    quiver = par.add_argument_group('Quiver Parameters')
+    quiver.add_argument('--quivbkg', action='store_true',
+                      help='''Quiver background based on norm of the vector field''')
+    quiver.add_argument('--filtnuclei', action='store_true',
+                      help='''Filter out the current density vectors that are too close to the nuclei''')
+    quiver.add_argument('--qlower', type=float, default=0.0001,
+                      help='''Lower bound for the vector field values''')
+    quiver.add_argument('--qupper', type=float, default=0.01,
+                      help='''Upper bound for the vector field values''')
+    quiver.add_argument('--subsample', type=int, default=1,
+                      help='''Show only every nth vector (default: 1, no subsampling)''')
     # Molecule Drawing Parameters
     molecule = par.add_argument_group('Drawing Molecule Parameters')
     molecule.add_argument('--scaleNuc', type=float, default=1.0,
@@ -102,14 +109,14 @@ if __name__ == '__main__':
         print(cp.printred('ERROR: cube file {} does not exist'.format(OPTS.cubefile)))
         sys.exit()
     # Set grid step
-    if OPTS.grid:
-        ngrdstp = OPTS.grid
-    else:
-        ngrdstp = NSTEP_BOX
     # Get molecule information
     # Parse and load cube data
     print('Loading molecular and transition current density from cube file...')
     cubdat = cb.cube_parser(OPTS.cubefile)
+    if OPTS.filtnuclei:
+        _mvox = molecular_voxels(cubdat, minthresh=0., maxthresh=0.15)
+        cubdat.cube[:, _mvox] = 0. 
+
     cubdat.make_box()
 
 
@@ -168,10 +175,12 @@ Coordinates (in Bohr)
     
     # Draw current density vectors
     if OPTS.type == 'quiver':
+        clim = [OPTS.qlower, OPTS.qupper]
         bkg = False
         if OPTS.quivbkg:
             bkg = True
-        QUIV = cbplt.quiver_plt(ax0, cubdat, OPTS.axis, OPTS.vscale, background=bkg)
+        QUIV = cbplt.quiver_plt(ax0, cubdat, OPTS.axis, OPTS.vscale, background=bkg,
+                                clim=clim, subsample=OPTS.subsample)
         fig0.savefig(os.path.join(resfolder, 'quiv2D_axis{}.{}'.format(OPTS.axis, OPTS.figext)))
     elif OPTS.type == 'stream':
         STRM = cbplt.stream_plt(ax0, cubdat, OPTS.axis)

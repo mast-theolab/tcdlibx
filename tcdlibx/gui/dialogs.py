@@ -820,6 +820,8 @@ class QuiverSetupDialog(QDialog, _ClipPlaneMixin):
     def __init__(self,
                  scale: float,
                  subsamp: int,
+                 lower: float = 0.0001,
+                 upper: float = 0.01,
                  enable_clipping: bool = False,
                  clip_bounds: tp.Optional[tp.Dict[str, tp.Optional[float]]] = None,
                  vtk_renderer=None,
@@ -832,6 +834,8 @@ class QuiverSetupDialog(QDialog, _ClipPlaneMixin):
         Args:
             scale (float): scaling factor for arrows
             subsamp (int): Subsampling of the grid for arrows
+            lower (float): lower bound to filter arrows (vectors below this norm are hidden)
+            upper (float): upper bound to filter arrows (vectors above this norm are clamped)
             enable_clipping (bool): whether spatial clipping is enabled
             clip_bounds (tp.Optional[tp.Dict[str, tp.Optional[float]]]): clipping bounds
             parent (tp.Optional[tp.Union[QDialog, None]]): Not required
@@ -842,6 +846,8 @@ class QuiverSetupDialog(QDialog, _ClipPlaneMixin):
         self._enable_clipping = enable_clipping
         self._clip_bounds = clip_bounds or {}
         self._init_clip_planes(vtk_renderer, vtk_render_window, vtk_scene_bounds)
+        self._lower = lower
+        self._upper = upper
         self.setWindowTitle("Quiver Setup Dialog")
         self.vlay = QVBoxLayout()
         grid = QGridLayout()
@@ -926,6 +932,20 @@ class QuiverSetupDialog(QDialog, _ClipPlaneMixin):
         # Clip-plane preview checkbox (enabled only when clipping and VTK are available)
         self.vlay.addWidget(self._setup_plane_preview_ui(enable_clipping))
 
+        _bnd_validator = QDoubleValidator()
+        _bnd_validator.setLocale(QLocale.c())
+        message = QLabel("Lower bound (hide vectors below this norm):")
+        self._lowerline = EditDoubleLine("Lower", lower, _bnd_validator)
+        grid.addWidget(message, 4, 0)
+        grid.addLayout(self._lowerline._hlay, 5, 0)
+
+        _bnd_validator2 = QDoubleValidator()
+        _bnd_validator2.setLocale(QLocale.c())
+        message = QLabel("Upper bound (clamp vectors above this norm):")
+        self._upperline = EditDoubleLine("Upper", upper, _bnd_validator2)
+        grid.addWidget(message, 6, 0)
+        grid.addLayout(self._upperline._hlay, 7, 0)
+
         QBtn = QDialogButtonBox.Ok | QDialogButtonBox.Cancel 
 
         self.buttonBox = QDialogButtonBox(QBtn)
@@ -940,6 +960,8 @@ class QuiverSetupDialog(QDialog, _ClipPlaneMixin):
     def _setvals(self):
         self._scale = self._scalemol._getvalue()
         self._subsamp = self._subsampline._getvalue()
+        self._lower = self._lowerline._getvalue()
+        self._upper = self._upperline._getvalue()
         
         # Handle spatial clipping bounds
         self._enable_clipping = self._clipping_checkbox.isChecked()
@@ -968,6 +990,7 @@ class QuiverSetupDialog(QDialog, _ClipPlaneMixin):
         self._clipping_frame.setVisible(is_enabled)
         self._enable_clipping = is_enabled
         self._update_clipping_toggle(is_enabled)
+
 
 
 class MoleculeConfigDialog(QDialog):

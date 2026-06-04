@@ -431,6 +431,7 @@ class EleMolecule(Molecule):
         if state > self._nstates -1  or state < 0:
             raise NoValidData("EleMolecule.get_vtcd_dtm", "State out of range")
         if tps == "tot":
+            # -1 * -1 tcd should have - to give the velocity form, but the conversion to length already has a -1 factor, so they cancel out
             res = (self._etcd[state].integrate() / self._moldata['exeng'][state], # to length
                    self._etcd[state].rotorintegrate()/2)
         elif tps == "frags":
@@ -552,28 +553,36 @@ def fibonacci_spiral_samples_on_unit_sphere(nb_samples, mode=0):
         j += 1
     return ss
 
-DEFAULT_VIS_VALS = {'isoval': {'iso': 0.01},
+DEFAULT_PARAMETERS = {'isoval': {'iso': 0.01},
                          'vfield': {'vfmax': 1e2,
                                     'vfmin': 1e5,
                                     'mspeed': None,
                                     'npoints': 100,
                                     'scalellipse': 3.,
+                                    'scalevdw': 2.0,
+                                    'sampling_method': 'ellipsoid',
                                     'showdir': False,
-                                    'showell': False,
+                                    'showseeds': False,
                                     'conescale': .1,
                                     'showbar': False,
                                     'animate_particles': False,
                                     'num_particles': 15,
-                                    'particle_type': 'sphere'},
+                                    'particle_type': 'sphere',
+                                    'enable_clipping': False,
+                                    'clip_bounds': {}},
                          'quiver': {'scale': 100,
-                                   'subsample': 5},
-                         'tensor': {'sphere_radius': 0.5,
-                                    'nb_sphere_samples': 50,
-                                    'nb_sphere_surface': 250,
-                                    'vector_scale': 1.0,
-                                    'surface_scale': 1.0,
-                                    'opacity': 0.8,
-                                    'color_scheme': 'weight_mag',
-                                    'surf_color_scheme': 'magnitude',
-                                    'atom_filter': None,
-                                    'show_spheres': False}}
+                                   'subsample': 5,
+                                   'lower': 0.0001,
+                                   'upper': 0.01,
+                                   'enable_clipping': False,
+                                   'clip_bounds': {}},
+                         'nmconfig': {'invert_phase': False,
+                                     'scale_factor': 1.0,
+                                     'color': (0.0, 0.0, 1.0)},
+                         'molconfig': {'wireframe': False,
+                                      'opacity': 1.0,
+                                      'bond_radius': 0.03,
+                                      'atom_radius_scale': 0.1,
+                                      'tubes_mode': False,
+                                      'bond_tollerance': 0.23,
+                                      'hide_auto_group': False},}

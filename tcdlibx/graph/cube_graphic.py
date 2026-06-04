@@ -452,25 +452,14 @@ def animated_stream(fig0, params, fname='test.gif', nfr=27, savegif=False):
 
 
 def quiver_plt(ax0, cubdat, axis, vscale,
-               filtred=False, col='black', alf=1, background=False):
+               filtred=False, col='black', alf=1, background=False, clim=None,
+               subsample=1):
     """
     TODO description
     """
     vec2, box2 = simp_proj(cubdat, axis)
     ithx, ith_one, ith_two = check_ax(axis)
     ax_dim = (cubdat.npts[ith_one], cubdat.npts[ith_two])
-    if filtred:
-        vec_norm = np.sqrt((vec2 ** 2).sum(axis=0))
-        # index = np.where(vec_norm > 5e-2)
-        vec_max = vec_norm.max()
-        index2 = np.where(vec_norm > vec_max * 0.5)
-        vec2[:, index2] *= 0.5
-        # box2 = box2[:, index]
-        # vec2 = vec2[:, index]
-    quiv = ax0.quiver(box2[0, :], box2[1, :], vec2[0, :],
-                      vec2[1, :], units='width',
-                      scale=vscale, color=col, alpha=alf,
-                      zorder=3)
     if background:
         vec_norm = (np.linalg.norm(vec2, axis=0)).reshape(ax_dim).T
         _cmap = cm.get_cmap('Blues').copy()
@@ -481,6 +470,28 @@ def quiver_plt(ax0, cubdat, axis, vscale,
                                  box2[1, :].max(),
                                  box2[1, :].min()],
                    interpolation='bilinear', cmap=_cmap)
+    if subsample > 1:
+        vec2 = vec2[:, ::subsample]
+        box2 = box2[:, ::subsample]
+    # ax_dim = vec2.shape
+    if filtred:
+        vec_norm = np.sqrt((vec2 ** 2).sum(axis=0))
+        # index = np.where(vec_norm > 5e-2)
+        vec_max = vec_norm.max()
+        index2 = np.where(vec_norm > vec_max * 0.5)
+        vec2[:, index2] *= 0.5
+        # box2 = box2[:, index]
+        # vec2 = vec2[:, index]
+    if clim is not None:
+        vec_norm = np.sqrt((vec2 ** 2).sum(axis=0))
+        vec2[:, vec_norm < clim[0]] = 0
+        vec2[:, vec_norm > clim[1]] = clim[1]
+
+    quiv = ax0.quiver(box2[0, :], box2[1, :], vec2[0, :],
+                      vec2[1, :], units='width',
+                      scale=vscale, color=col, alpha=alf,
+                      zorder=3)
+ 
     return quiv
 
 

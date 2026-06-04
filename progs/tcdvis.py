@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 
 # Local imports - tcdlibx package
 from tcdlibx.calc.cube_manip import VecCubeData, VtcdData, cube_parser
-from tcdlibx.graph.helpers import EleMolecule, VibMolecule, filtervecatom, sample_molecular_volume
+from tcdlibx.graph.helpers import EleMolecule, VibMolecule, filtervecatom, sample_molecular_volume, DEFAULT_PARAMETERS
 import tcdlibx.graph.cube_graphvtk as cubetk
 from tcdlibx.gui.dialogs import (
     SavePngDialog, SavePngSeriesDialog, StreamLineSetupDialog, TCDDialog, QuiverSetupDialog, SaveSceneDialog, NMConfigDialog, MoleculeConfigDialog
@@ -87,37 +87,7 @@ class TCDvis(QMainWindow):
         self._show_particles = False
         self._seeds = None
         
-        self._default = {'isoval': {'iso': 0.01},
-                         'vfield': {'vfmax': 1e2,
-                                    'vfmin': 1e5,
-                                    'mspeed': None,
-                                    'npoints': 100,
-                                    'scalellipse': 3.,
-                                    'scalevdw': 2.0,
-                                    'sampling_method': 'ellipsoid',
-                                    'showdir': False,
-                                    'showseeds': False,
-                                    'conescale': .1,
-                                    'showbar': False,
-                                    'animate_particles': False,
-                                    'num_particles': 15,
-                                    'particle_type': 'sphere',
-                                    'enable_clipping': False,
-                                    'clip_bounds': {}},
-                         'quiver': {'scale': 100,
-                                   'subsample': 5,
-                                   'enable_clipping': False,
-                                   'clip_bounds': {}},
-                         'nmconfig': {'invert_phase': False,
-                                     'scale_factor': 1.0,
-                                     'color': (0.0, 0.0, 1.0)},
-                         'molconfig': {'wireframe': False,
-                                      'opacity': 1.0,
-                                      'bond_radius': 0.03,
-                                      'atom_radius_scale': 0.1,
-                                      'tubes_mode': False,
-                                      'bond_tollerance': 0.23,
-                                      'hide_auto_group': False},}
+        self._default = copy.deepcopy(DEFAULT_PARAMETERS) 
 
         self.initUI()
 
@@ -383,6 +353,7 @@ class TCDvis(QMainWindow):
         self.prop.addItem('MoE')
         self.prop.addItem('EoM')
         self.prop.addItem('EoE')
+        self.prop.addItem('MoM')
         self.prop.currentIndexChanged.connect(self._enablefieldsetup)
         grid.addWidget(self.prop, 0, 1)
         self.etcdch = QPushButton('Show ETCD field', self)
@@ -912,13 +883,17 @@ class TCDvis(QMainWindow):
                                          clip_bounds=self._default["quiver"]["clip_bounds"],
                                          vtk_renderer=self.ren,
                                          vtk_render_window=self.vtkWidget.GetRenderWindow(),
-                                         vtk_scene_bounds=_vtk_bounds)
+                                         vtk_scene_bounds=_vtk_bounds,
+                                         lower=self._default["quiver"]["lower"],
+                                         upper=self._default["quiver"]["upper"])
             quiverprm.exec()
             # Update the default values
             self._default["quiver"]["scale"] = quiverprm._scale
             self._default["quiver"]["subsample"] = quiverprm._subsamp
             self._default["quiver"]["enable_clipping"] = quiverprm._enable_clipping
             self._default["quiver"]["clip_bounds"] = quiverprm._clip_bounds
+            self._default["quiver"]["lower"] = quiverprm._lower
+            self._default["quiver"]["upper"] = quiverprm._upper
             
             # Redraw quiver if it exists
             if 'tcd' in self._actors:
@@ -1346,7 +1321,9 @@ class TCDvis(QMainWindow):
             mask_index = filtervecatom(tmp_cube, 0.3)
             tmp_cube.cube[:, mask_index] = 0
             tmp_cube.loc2wrd *=  PHYSFACT.bohr2ang
-            self._actors['tcd'] = cubetk.quiv3d(tmp_cube, 
+            self._actors['tcd'] = cubetk.quiv3d(tmp_cube,
+                                               lower=self._default["quiver"]["lower"],
+                                               upper=self._default["quiver"]["upper"],
                                                scale=self._default["quiver"]["scale"],
                                                subsample_factor=self._default["quiver"]["subsample"],
                                                clip_bounds=self._default["quiver"]["clip_bounds"] if self._default["quiver"]["enable_clipping"] else None)
@@ -1389,7 +1366,8 @@ class TCDvis(QMainWindow):
             else:
                 tmp_cube = tmp_cube.proj_on_vec("eoe", nucl=False, cube=True)
             tmp_cube.loc2wrd *=  PHYSFACT.bohr2ang
-            tmp_cube.cube /= self._fchk.get_transeng(self._activest)
+            if self._moltype == 'ele':
+                tmp_cube.cube /= self._fchk.get_transeng(self._activest)
             tmp_cube.cube /= PHYSFACT.bohr2ang**3
             self._actors['tcd'] = cubetk.countur(tmp_cube, tmp_iso)
             if DEBUG:
@@ -1398,6 +1376,22 @@ class TCDvis(QMainWindow):
                 print(f"From Vec cube: {np.dot(tmp[0], tmp[0]):.5f}")
                 tmp = self._fchk.get_dtm(self._activest, cgs=False)
                 print(f"From FCHK: {np.dot(tmp[0], tmp[0]):.5f}")
+        elif prop_cur == "mom":
+            if self._moltype == 'ele':
+                vec = tmp_cube.rotorintegrate()
+                tmp_cube = tmp_cube.proj_on_vec(vec=vec, rot=True, cube=True)
+                # tmp_cube.cube /= self._fchk.get_exeng(self._activest)
+            else:
+                tmp_cube = tmp_cube.proj_on_vec("mom", nucl=False, cube=True)
+            tmp_cube.loc2wrd *=  PHYSFACT.bohr2ang
+            tmp_cube.cube /= PHYSFACT.bohr2ang**3
+            self._actors['tcd'] = cubetk.countur(tmp_cube, tmp_iso)
+            if DEBUG:
+                print(f"Integrated scalar: {tmp_cube.integrate():.5f}" )
+                tmp = self._fchk.get_tcd_dtm(self._activest, cgs=False)
+                print(f"From Vec cube: {np.dot(tmp[1], tmp[1]):.5f}")
+                tmp = self._fchk.get_dtm(self._activest, cgs=False)
+                print(f"From FCHK: {np.dot(tmp[1], tmp[1]):.5f}")
 
         self.ren.AddActor(self._actors['tcd'].actor)
         if 'tcdbar' in self._actors:
