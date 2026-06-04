@@ -503,6 +503,96 @@ class SaveSceneDialog(QDialog):
             self.folderPath.setText(folder)
 
 
+class ExportPOVDialog(QDialog):
+    """Dialog for exporting the current VTK scene to a POV-Ray file via vtkPOVExporter."""
+
+    def __init__(self, parent=None, fname="scene.pov"):
+        super().__init__(parent)
+        self._fname = fname
+        self._okexit = False
+        self._folder = os.path.dirname(fname) if os.path.dirname(fname) else "."
+
+        self.setWindowTitle("Export POV-Ray Scene")
+
+        nameLabel = QLabel("POV-Ray filename:", self)
+        self.povname = QLineEdit(self)
+        pov_valid = QRegularExpressionValidator(
+            QRegularExpression(r'.*\.pov'), self)
+        self.povname.setValidator(pov_valid)
+        self.povname.setText(os.path.basename(self._fname))
+        self.povname.textEdited.connect(self._setcheck)
+
+        folderLabel = QLabel("Save in:", self)
+        self.folderPath = QLineEdit(self)
+        self.folderPath.setText(self._folder)
+        self.folderPath.setReadOnly(True)
+        self.browseButton = QPushButton("Browse...", self)
+        self.browseButton.clicked.connect(self._browse_folder)
+
+        grid = QGridLayout()
+        grid.addWidget(nameLabel, 0, 0)
+        grid.addWidget(self.povname, 0, 1, 1, 2)
+        grid.addWidget(folderLabel, 1, 0)
+        grid.addWidget(self.folderPath, 1, 1)
+        grid.addWidget(self.browseButton, 1, 2)
+
+        QBtn = QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        self.buttonBox = QDialogButtonBox(QBtn)
+        self.okbtn = self.buttonBox.button(QDialogButtonBox.Ok)
+        self.buttonBox.accepted.connect(self.accept)
+        self.accepted.connect(self._getfname)
+        self.buttonBox.rejected.connect(self.reject)
+
+        vlay = QVBoxLayout()
+        vlay.addLayout(grid)
+        vlay.addWidget(self.buttonBox)
+        self.setLayout(vlay)
+
+    def _getfname(self):
+        self._fname = os.path.join(self._folder, self.povname.text())
+        if os.path.exists(self._fname):
+            reply = QMessageBox.question(
+                self,
+                "File Exists",
+                f'The file "{os.path.basename(self._fname)}" already exists.\n\nOverwrite?',
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if reply == QMessageBox.No:
+                self._okexit = False
+                return
+        self._okexit = True
+
+    def _setcheck(self):
+        self.okbtn.setEnabled(self.povname.hasAcceptableInput())
+
+    def _browse_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, "Select Save Directory", self._folder)
+        if folder:
+            self._folder = folder
+            self.folderPath.setText(folder)
+
+    def export(self, render_window) -> bool:
+        """Run vtkPOVExporter on *render_window* using the confirmed filename.
+
+        Returns True on success, False if the dialog was cancelled or the
+        export failed.
+        """
+        if not self._okexit:
+            return False
+        try:
+            from vtkmodules.vtkIOExport import vtkPOVExporter
+        except ImportError:
+            QMessageBox.critical(self, "Missing module",
+                                 "vtkmodules.vtkIOExport is not available in this VTK build.")
+            return False
+        exporter = vtkPOVExporter()
+        exporter.SetRenderWindow(render_window)
+        exporter.SetFileName(self._fname)
+        exporter.Write()
+        return True
+
+
 class NMConfigDialog(QDialog):
     def __init__(self, parent=None, invert_phase=False, scale_factor=1.0, color=(1.0, 0.0, 0.0)):
         super().__init__(parent)
@@ -862,12 +952,26 @@ class QuiverSetupDialog(QDialog, _ClipPlaneMixin):
         self._subsampline = EditIntLine("Subsampling", subsamp, QIntValidator(1, 500))
         grid.addWidget(message, 2, 0)
         grid.addLayout(self._subsampline._hlay, 3, 0)
-        
+
+        _bnd_validator = QDoubleValidator()
+        _bnd_validator.setLocale(QLocale.c())
+        message = QLabel("Lower bound (hide vectors below this norm):")
+        self._lowerline = EditDoubleLine("Lower", lower, _bnd_validator)
+        grid.addWidget(message, 4, 0)
+        grid.addLayout(self._lowerline._hlay, 5, 0)
+
+        _bnd_validator2 = QDoubleValidator()
+        _bnd_validator2.setLocale(QLocale.c())
+        message = QLabel("Upper bound (clamp vectors above this norm):")
+        self._upperline = EditDoubleLine("Upper", upper, _bnd_validator2)
+        grid.addWidget(message, 6, 0)
+        grid.addLayout(self._upperline._hlay, 7, 0)
+
         # Spatial clipping section
         self._clipping_checkbox = QCheckBox("Enable Spatial Clipping")
         self._clipping_checkbox.setChecked(enable_clipping)
         self._clipping_checkbox.stateChanged.connect(self._toggle_clipping)
-        grid.addWidget(self._clipping_checkbox, 4, 0, 1, 2)
+        grid.addWidget(self._clipping_checkbox, 8, 0, 1, 2)
         
         # Create clipping controls group (initially hidden)
         self._clipping_frame = QFrame()
@@ -931,20 +1035,6 @@ class QuiverSetupDialog(QDialog, _ClipPlaneMixin):
 
         # Clip-plane preview checkbox (enabled only when clipping and VTK are available)
         self.vlay.addWidget(self._setup_plane_preview_ui(enable_clipping))
-
-        _bnd_validator = QDoubleValidator()
-        _bnd_validator.setLocale(QLocale.c())
-        message = QLabel("Lower bound (hide vectors below this norm):")
-        self._lowerline = EditDoubleLine("Lower", lower, _bnd_validator)
-        grid.addWidget(message, 4, 0)
-        grid.addLayout(self._lowerline._hlay, 5, 0)
-
-        _bnd_validator2 = QDoubleValidator()
-        _bnd_validator2.setLocale(QLocale.c())
-        message = QLabel("Upper bound (clamp vectors above this norm):")
-        self._upperline = EditDoubleLine("Upper", upper, _bnd_validator2)
-        grid.addWidget(message, 6, 0)
-        grid.addLayout(self._upperline._hlay, 7, 0)
 
         QBtn = QDialogButtonBox.Ok | QDialogButtonBox.Cancel 
 

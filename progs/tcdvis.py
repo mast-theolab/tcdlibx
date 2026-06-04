@@ -27,7 +27,7 @@ from tcdlibx.calc.cube_manip import VecCubeData, VtcdData, cube_parser
 from tcdlibx.graph.helpers import EleMolecule, VibMolecule, filtervecatom, sample_molecular_volume, DEFAULT_PARAMETERS
 import tcdlibx.graph.cube_graphvtk as cubetk
 from tcdlibx.gui.dialogs import (
-    SavePngDialog, SavePngSeriesDialog, StreamLineSetupDialog, TCDDialog, QuiverSetupDialog, SaveSceneDialog, NMConfigDialog, MoleculeConfigDialog
+    SavePngDialog, SavePngSeriesDialog, StreamLineSetupDialog, TCDDialog, QuiverSetupDialog, SaveSceneDialog, ExportPOVDialog, NMConfigDialog, MoleculeConfigDialog
 )
 from tcdlibx.io.estp_io import PHYSFACT, get_elemol, get_vibmol
 from tcdlibx.io.jsonio import read_json, write_json
@@ -135,6 +135,11 @@ class TCDvis(QMainWindow):
         ssceneButton.setStatusTip('Save a VKScene in a JSON file')
         ssceneButton.triggered.connect(self.save_scene)
         fileMenu.addAction(ssceneButton)
+        # Export scene as POV-Ray file
+        exportPOVButton = QAction(QIcon(''), 'ExportScenePOV', self)
+        exportPOVButton.setStatusTip('Export the current scene to a POV-Ray file')
+        exportPOVButton.triggered.connect(self.export_scene_pov)
+        fileMenu.addAction(exportPOVButton)
 
         ## Exit
         exitButton = QAction(QIcon('exit24.png'), 'Exit', self)
@@ -1592,6 +1597,11 @@ class TCDvis(QMainWindow):
         res['Camera:ClippingRange'] = camera.GetClippingRange()
         res['Used parameters'] = self._default
         write_json(res, fname)
+
+    def export_scene_pov(self):
+        dlg = ExportPOVDialog(parent=self)
+        if dlg.exec() == ExportPOVDialog.Accepted:
+            dlg.export(self.vtkWidget.GetRenderWindow())
 
     def _batch_operations(self):
         """Performs batch operations on multiple files using a configuration JSON file.
