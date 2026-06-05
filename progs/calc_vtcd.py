@@ -101,7 +101,7 @@ def get_nac(fname, vstate=None):
             print('ERROR: vibrational state definition not supported with fchk')
             return False
         else:
-            with open(fname, 'r') as fobj:
+            with open(fname, 'r', encoding='utf-8') as fobj:
                 line = fobj.readline()
                 while not line.startswith('Nonadiabatic coupling'):
                     line = fobj.readline()
@@ -116,7 +116,7 @@ def get_nac(fname, vstate=None):
                     data.extend([float(item) for item in line.split()])
     elif ext in ('log', 'out'):
         if vstate is None:
-            with open(fname, 'r') as fobj:
+            with open(fname, 'r', encoding='utf-8') as fobj:
                 line = fobj.readline()
                 while 'Nonadiabatic Coup.' not in line:
                     line = fobj.readline()
@@ -132,7 +132,7 @@ def get_nac(fname, vstate=None):
         else:
             txt = '\\s+'.join(vstate)+'\\s+'
             key = re.compile(r'^\s+'+txt.replace('(', '\\(').replace(')', '\\)')+r'-?\d+\.')
-            with open(fname, 'r') as fobj:
+            with open(fname, 'r', encoding='utf-8') as fobj:
                 line = fobj.readline()
                 while 'Anharmonic Transition Moments' not in line:
                     line = fobj.readline()
@@ -181,7 +181,7 @@ def get_transition_energy(fname):
     reads from the fchk file the SCF Energy and the total energy
     returns the transition energy as: Etot-E0
     """
-    with open(fname, 'r') as fopen:
+    with open(fname, 'r', encoding='utf-8') as fopen:
         line = fopen.readline()
         while not line.startswith('SCF Energy'):
             line = fopen.readline()

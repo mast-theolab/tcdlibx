@@ -11,7 +11,7 @@ packages = ["tcdlibx", "tcdlibx.calc", "tcdlibx.graph", "tcdlibx.gui", "tcdlibx.
 [project]
 name = "tcdlibx"
 version = "0.1.0"
-requires-python = ">= 3.8"
+requires-python = ">= 3.10"
 dependencies = ['numpy',
 #    'estampes @ git+https://github.com/mast-theolab/estampes.git',
     'matplotlib']
@@ -31,11 +31,12 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-gui = ['PySide6', 'vtk']
+gui = ['PySide6', 'vtk', 'estampes']
 
 
 [project.scripts]
-calc_vtcd = "progs.calc_vtcd:main"
+plot_etcd2d = "progs.plot_etcd_quiv2D:main"
+plot_vtcd2d = "progs.plot_vtcd_quiv2D:main"
 
 [project.gui-scripts]
 tcdvis = "progs.tcdvis:main"

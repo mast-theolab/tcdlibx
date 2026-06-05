@@ -7,7 +7,7 @@ def write_json(dictionar: dict, fname: str) -> None:
 
     """
     towrite = json.dumps(dictionar, indent=4)
-    with open(fname, 'w') as fopen:
+    with open(fname, 'w', encoding='utf-8') as fopen:
         fopen.write(towrite)
 
 

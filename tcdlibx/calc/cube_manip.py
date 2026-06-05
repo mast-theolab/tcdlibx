@@ -1287,7 +1287,7 @@ def print_cube(cubdata, fname: str = 'cubefile.cube',
     param gau_style: add a \\n after each z index end
     """
     outfile = '{}'.format(fname)
-    fout = open(outfile, 'w')
+    fout = open(outfile, 'w', encoding='utf-8')
     fout.write(' Cube generated with tcdlib\n')
     fout.write(' {}\n'.format(comment))
     fmt_2 = '{:5d}{b[0]:12.6f}{b[1]:12.6f}{b[2]:12.6f}'
@@ -1357,7 +1357,7 @@ def cube_parser(cubfile: str,
         raise OSError
 
     data_tmp = CubeData()
-    with open(cubfile, 'r') as fi_le:
+    with open(cubfile, 'r', encoding='utf-8') as fi_le:
         # 1st 2 lines are titles/comments. Ignored for now
         line = fi_le.readline()  # Title
         line = fi_le.readline()  # Comment

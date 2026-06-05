@@ -410,7 +410,7 @@ def print_lines(lines_to_prt, state, vib, fold):
     """
     Stupid function to print a formatted line
     """
-    ofile = open(os.path.join(fold, 'dipolePrint_VibState{}_{}.dat'.format(vib, state)), 'w')
+    ofile = open(os.path.join(fold, 'dipolePrint_VibState{}_{}.dat'.format(vib, state)), 'w', encoding='utf-8')
     ofile.write('# {}    {}    {}\n'.format('N', 'EDTM', 'MDTM'))
     for line in lines_to_prt:
         ofile.write(line)

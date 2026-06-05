@@ -61,7 +61,7 @@ def main():
     tmplfmt = tmplname.replace(res[0], '{{:0{:d}d}}'.format(len(res[0])))
     
     # Write header to output file before starting calculations
-    with open(fout, 'w') as f:
+    with open(fout, 'w', encoding='utf-8') as f:
         f.write("DTM Analysis Results\n")
         f.write("=" * 131 + "\n")
         f.write("N. {:^8s}".format("Freq."))
@@ -100,7 +100,7 @@ def main():
         print("TCD RS:{:10.5f}".format(np.dot(tcd_tot[0],tcd_tot[1])))
         
         # Print results for each state to output file
-        with open(fout, 'a') as f:
+        with open(fout, 'a', encoding='utf-8') as f:
             f.write(f"{i:3d}")
             f.write(f"{fchk._moldata['freq'][i-1]:8.2f}")
             f.write(f"{mfp_dtm[0][0]:10.5f} {mfp_dtm[0][1]:10.5f} {mfp_dtm[0][2]:8.4f}")
