@@ -1274,9 +1274,9 @@ class AimCubeData(VecCubeData):
     #     return data_tmp
 
 
-def print_cube(cubdata, fname: str = 'cubefile.cube',
+def print_cube(cubdata: 'CubeData', fname: str = 'cubefile.cube',
                comment: str = 'Commentline',
-               vec_pr=None, gau_style=True) -> None:
+               vec_pr: np.ndarray | None = None, gau_style: bool = True) -> None:
     """
     Print a volumetric dataset contained in CubeData
     as Gaussian Cube File
@@ -1332,19 +1332,19 @@ def print_cube(cubdata, fname: str = 'cubefile.cube',
     fout.close()
 
 
-def print_vec_incube(fname, vect1, vect2):
-    """
-    Hack to print EDTM and MDTM into a cube file
-    """
-    dcube = CubeData()
-    dcube.natoms = 0
-    dcube.loc2wrd = np.identity(4)
-    dcube.npts = [2, 2, 2]
-    dcube.nval = 3
-    dcube.cube = np.zeros((3, 8))
-    dcube.cube[:, 0] = vect1
-    dcube.cube[:, 1] = vect2
-    print_cube(dcube, 'ELC+MAG', '{}'.format(fname))
+# def print_vec_incube(fname, vect1, vect2):
+#     """
+#     Hack to print EDTM and MDTM into a cube file
+#     """
+#     dcube = CubeData()
+#     dcube.natoms = 0
+#     dcube.loc2wrd = np.identity(4)
+#     dcube.npts = [2, 2, 2]
+#     dcube.nval = 3
+#     dcube.cube = np.zeros((3, 8))
+#     dcube.cube[:, 0] = vect1
+#     dcube.cube[:, 1] = vect2
+#     print_cube(dcube, 'ELC+MAG', '{}'.format(fname))
 
 
 def cube_parser(cubfile: str,

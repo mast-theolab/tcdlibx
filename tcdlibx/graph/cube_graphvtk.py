@@ -4,7 +4,6 @@ VTK objects
 """
 # import sys
 # import os
-import typing as tp
 import numpy as np
 
 # Import VTK with error handling
@@ -23,11 +22,11 @@ def dots2vtkarray(dots: np.ndarray) -> vtk.vtkPolyData:
     pointPolyData1.SetPoints(points1)
     return pointPolyData1
 
-def create_vector_field_polydata(positions: np.ndarray, 
-                                vectors: np.ndarray,
-                                scalars: tp.Optional[np.ndarray] = None,
-                                vector_name: str = 'vectors',
-                                scalar_name: str = 'scalars') -> vtk.vtkPolyData:
+def create_vector_field_polydata(positions: np.ndarray,
+                                 vectors: np.ndarray,
+                                 scalars: np.ndarray | None = None,
+                                 vector_name: str = 'vectors',
+                                 scalar_name: str = 'scalars') -> vtk.vtkPolyData:
     """
     Create a vtkPolyData with vectors at specified positions in space.
     
@@ -88,7 +87,7 @@ def create_vector_field_polydata(positions: np.ndarray,
     return polydata
 
 
-def fillcubeimage(data, vec=True, logscale=False, aslist=False):
+def fillcubeimage(data: CubeData, vec: bool = True, logscale: bool = False, aslist: bool = False) -> vtk.vtkImageData | list:
     """
     Fills a vtkImageData object
 
@@ -187,10 +186,12 @@ def fillcubeimage(data, vec=True, logscale=False, aslist=False):
     # print(norm.GetRange())
     return cubeimage
 
-def fillmolecule(atm, crd, 
-                 opacity=1, bond_radius=None, atom_radius_scale=None,
-                 tubes_mode=False,
-                 bond_tollerance=0.23) -> MyvtkActor:
+def fillmolecule(atm: np.ndarray, crd: np.ndarray,
+                 opacity: float = 1,
+                 bond_radius: float | None = None,
+                 atom_radius_scale: float | None = None,
+                 tubes_mode: bool = False,
+                 bond_tollerance: float = 0.23) -> MyvtkActor:
     """
     Create a VTK molecule visualization.
 
@@ -238,11 +239,13 @@ def fillmolecule(atm, crd,
     return MyvtkActor(actor, mol)
 
 
-def fillmolecule_custom(atm, crd, 
-                 opacity=1, bond_radius=None, atom_radius_scale=None,
-                 tubes_mode=False,
-                 bond_tollerance=0.23,
-                 excluded_atoms=None) -> MyvtkActor:
+def fillmolecule_custom(atm: np.ndarray, crd: np.ndarray,
+                        opacity: float = 1,
+                        bond_radius: float | None = None,
+                        atom_radius_scale: float | None = None,
+                        tubes_mode: bool = False,
+                        bond_tollerance: float = 0.23,
+                        excluded_atoms: list[int] | None = None) -> MyvtkActor:
     """
     Create a VTK molecule visualization.
 
@@ -299,8 +302,7 @@ def fillmolecule_custom(atm, crd,
     actor.GetProperty().SetOpacity(opacity)
     return MyvtkActor(actor, mol)
 
-def _quivfromcube(cubdata: VecCubeData,
-logscale=False) -> vtk.vtkImageData:
+def _quivfromcube(cubdata: VecCubeData, logscale: bool = False) -> vtk.vtkImageData:
     """
     Return a vtkImageData object with the vector field
     from a VecCubeData object.
@@ -311,13 +313,13 @@ logscale=False) -> vtk.vtkImageData:
     return grid
 
 def quiv3d(
-    vecdata: tp.Union[VecCubeData, vtk.vtkPolyData],
+    vecdata: VecCubeData | vtk.vtkPolyData,
     lower: float = 0.0001,
     upper: float = 0.01,
     scale: float = 1,
     logscale: bool = False,
-    subsample_factor: tp.Optional[int] = None,
-    glyphmode: str = 'arrow'
+    subsample_factor: int | None = None,
+    glyphmode: str = 'arrow',
 ) -> MyvtkActor:
     """
     Return a vtk actor with 3D quiver plot
@@ -395,23 +397,24 @@ def quiv3d(
     return MyvtkActor(glyph_actor, glyphs)
 
 
-def draw_nm3d(crd, evec, ian,
-              cngsign=True,
-              chgwght=True, scale=1,
-              color="blue"):
-    """_summary_
+def draw_nm3d(crd: np.ndarray, evec: np.ndarray, ian: np.ndarray,
+              cngsign: bool = True,
+              chgwght: bool = True,
+              scale: float = 1,
+              color: str | tuple = 'blue') -> MyvtkActor:
+    """ Draw a 3D quiver plot of the normal modes.
 
     Args:
-        crd (_type_): _description_
-        evec (_type_): _description_
-        ian (_type_): _description_
-        cngsign (bool, optional): _description_. Defaults to True.
-        chgwght (bool, optional): _description_. Defaults to True.
-        scale (int, optional): _description_. Defaults to 1.
-        color (str or tuple, optional): Color name (str) or RGB tuple (0.0-1.0). Defaults to "blue".
+        crd (np.ndarray): atomic coordinates
+        evec (np.ndarray): normal mode eigenvectors
+        ian (np.ndarray): atomic numbers
+        cngsign (bool, optional): Invert the phase of the eigenvectors. Defaults to True.
+        chgwght (bool, optional): Weight the eigenvectors by the atomic numbers. Defaults to True.
+        scale (float, optional): Scale factor for the arrows. Defaults to 1.
+        color (str | tuple, optional): Color name (str) or RGB tuple (0.0-1.0). Defaults to 'blue'.
 
     Returns:
-        _type_: _description_
+        MyvtkActor: _description_
     """
 
     # change the sign to be opposed to the TCD (must be done before weighting)
@@ -483,7 +486,7 @@ def draw_nm3d(crd, evec, ian,
     
     return MyvtkActor(glyph_actor, glyphs)
 
-def draw_vectors(crd, vecs, tps, scale=1):
+def draw_vectors(crd: np.ndarray, vecs: np.ndarray, tps: np.ndarray, scale: float = 1) -> MyvtkActor:
     """_summary_
 
     Args:
@@ -565,13 +568,13 @@ def draw_vectors(crd, vecs, tps, scale=1):
 
 
 def fillstreamline(cubdata: CubeData,
-                   nseeds: tp.Optional[int] = 150,
-                   center: tp.Optional[list] = [0., 0., 0.],
-                   opacity: tp.Optional[float] = 0.3,
-                   clipping: tp.Optional[tuple] = (1e2, 1e5),
-                   minspeed: tp.Optional[tp.Union[float, None]] = None,
-                   seeds: tp.Optional[tp.Union[np.ndarray, None]] = None,
-                   scale_rad=1) -> MyvtkActor:
+                   nseeds: int = 150,
+                   center: list[float] = [0., 0., 0.],
+                   opacity: float = 0.3,
+                   clipping: tuple[float, float] = (1e2, 1e5),
+                   minspeed: float | None = None,
+                   seeds: np.ndarray | None = None,
+                   scale_rad: float = 1) -> MyvtkActor:
     """_summary_
 
     Args:
@@ -666,7 +669,7 @@ def fillstreamline(cubdata: CubeData,
     
     return actor_wrapper
 
-def countur(cubedata, isoval, active='scalar', colors=None, opacity=0.3):
+def countur(cubedata: 'CubeData', isoval: list[float], active: str = 'scalar', colors: list | None = None, opacity: float = 0.3) -> MyvtkActor:
     """
     Return vtk actor with the isosurface plotted
     param: xax, yax, zax 3d grid of dimension NxNxN
@@ -679,7 +682,7 @@ def countur(cubedata, isoval, active='scalar', colors=None, opacity=0.3):
     # grid.GetPointData().SetActiveScalars(active)
     return _countur(grid, isoval, active, colors, opacity)
 
-def _countur(grid, isoval, active='scalar', colors=None, opacity=0.3):
+def _countur(grid: vtk.vtkImageData, isoval: list[float], active: str = 'scalar', colors: list | None = None, opacity: float = 0.3) -> MyvtkActor:
     # grid.GetPointData().SetActiveVectors("vector")
     grid.GetPointData().SetActiveScalars(active)
     # bounds = grid.GetScalarRange()
@@ -714,9 +717,9 @@ def _countur(grid, isoval, active='scalar', colors=None, opacity=0.3):
 
     return MyvtkActor(isosurf_actor, contourFilter)
 
-def volumerendering(cubedata, active='scalar',
-                    lower=0.0, upper=1.0,
-                    opacity=1.0):
+def volumerendering(cubedata: 'CubeData', active: str = 'scalar',
+                    lower: float = 0.0, upper: float = 1.0,
+                    opacity: float = 1.0) -> MyvtkActor:
     grid = fillcubeimage(cubedata)
     return _volumerendering(grid, active, lower, upper, opacity)
 
@@ -865,7 +868,7 @@ class StreamlineParticleAnimator:
     Handles animated particles along streamlines in VTK.
     """
     
-    def __init__(self, renderer: vtk.vtkRenderer, particle_type: str = "sphere"):
+    def __init__(self, renderer: vtk.vtkRenderer, particle_type: str = 'sphere') -> None:
         """
         Initialize the particle animator.
         
@@ -1220,7 +1223,7 @@ class StreamlineParticleAnimator:
         for particle in self.particle_actors:
             particle['actor'].SetVisibility(visible)
     
-    def update_particle_type(self, new_particle_type: str, streamline_polydata: vtk.vtkPolyData, num_particles: int = None) -> None:
+    def update_particle_type(self, new_particle_type: str, streamline_polydata: vtk.vtkPolyData, num_particles: int | None = None) -> None:
         """
         Update the particle type for existing animation.
         

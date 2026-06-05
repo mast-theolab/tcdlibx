@@ -5,11 +5,11 @@ import numpy as np
 import os
 import argparse
 import typing as tp
-from estampes.data.physics import phys_fact
+# from estampes.data.physics import phys_fact
 from tcdlibx.calc.cube_manip import VecCubeData, VtcdData, CubeData, cube_parser
 from tcdlibx.graph.helpers import EleMolecule, VibMolecule
 from tcdlibx.io.estp_io import get_elemol, get_vibmol
-from tcdlibx.utils.conversion_units import edip_cgs, mdip_cgs, ele_mdip_cgs, ele_edip_cgs, MWQ2q
+from tcdlibx.utils.conversion_units import edip_cgs, mdip_cgs, ele_mdip_cgs, ele_edip_cgs # , MWQ2q
 
 # FIXME: check the exceptions? leave it to the gui? 
 def open_fchk(fname: str) -> tp.Union[EleMolecule, VibMolecule]:
@@ -73,7 +73,7 @@ def main():
     print(f"State: {args.state}")
     # check only the electronic component
     fchk_dip = fchk.get_dtm(state, tps='ele', cgs=False)
-    fchk_dip_tot = fchk.get_dtm(state, tps='tot', cgs=False)
+    # fchk_dip_tot = fchk.get_dtm(state, tps='tot', cgs=False)
     cub_dip = fchk.get_tcd_dtm(state, cgs=False)
     if moltype == 'ele':
         fchk_dip_cgs = (ele_edip_cgs(fchk_dip[0]), ele_mdip_cgs(fchk_dip[1]))

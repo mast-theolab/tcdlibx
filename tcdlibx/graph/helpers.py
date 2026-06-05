@@ -523,7 +523,7 @@ class MyvtkActor():
         """Get the center of the actor"""
         return self._actor.GetCenter()
 
-def fibonacci_spiral_samples_on_unit_sphere(nb_samples, mode=0):
+def fibonacci_spiral_samples_on_unit_sphere(nb_samples: int, mode: int = 0) -> np.ndarray:
     """
     Generate points on a unit sphere using Fibonacci spiral sampling.
     Taken from:
