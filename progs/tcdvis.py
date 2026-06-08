@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 
 # Local imports - tcdlibx package
 from tcdlibx.calc.cube_manip import VecCubeData, VtcdData, cube_parser
-from tcdlibx.graph.helpers import EleMolecule, VibMolecule, filtervecatom, sample_molecular_volume, DEFAULT_PARAMETERS, write_molecule_pov
+from tcdlibx.graph.helpers import EleMolecule, VibMolecule, filtervecatom, sample_molecular_volume, DEFAULT_PARAMETERS, write_molecule_pov, vdw_boolean_mask
 import tcdlibx.graph.cube_graphvtk as cubetk
 from tcdlibx.gui.dialogs import (
     SavePngDialog, SavePngSeriesDialog, StreamLineSetupDialog, TCDDialog, QuiverSetupDialog, SaveSceneDialog, ExportPOVDialog, NMConfigDialog, MoleculeConfigDialog
@@ -1070,6 +1070,11 @@ class TCDvis(QMainWindow):
                 print(f"Added unlisted atoms to additional fragment: {[x+1 for x in unlisted_list]}")
             
             self._fchk.set_fragment(res)
+            if self._fchk._aimdata is not None:
+                if self._moltype == 'ele':
+                    self._menus['etcd']['saim'].setEnabled(True)
+                elif self._moltype == 'vib':
+                    self._menus['vtcd']['saim'].setEnabled(True)
             if (self._fchk._aimdata is not None and 
                 self._activest in self._fchk.avail_tcd()):
                 if self._moltype == 'ele':
@@ -1539,7 +1544,9 @@ class TCDvis(QMainWindow):
         if saim_checked:
             ind = self._fchk.avail_tcd()[0]
             tmp_cube = self._fchk.get_tcd(ind).get_frag_isosurf()
-            tmp_cube.loc2wrd *=  PHYSFACT.bohr2ang 
+            _mask = vdw_boolean_mask(tmp_cube, thresh=2)
+            tmp_cube.loc2wrd *=  PHYSFACT.bohr2ang
+            tmp_cube.cube = np.where(_mask, tmp_cube.cube, -1e10)  # Mask out values outside the vdW surface
             colors = self._fchk.get_frag_colors()
             grids = cubetk.fillcubeimage(tmp_cube, vec=False, aslist=True)
             

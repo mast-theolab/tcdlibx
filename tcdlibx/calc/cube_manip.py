@@ -441,7 +441,8 @@ class CubeData:
         loc_point = np.round(loc_point, 5)
         # BUG assumed an orthonormal set of coordinate
         # select a rectangular box and then refine
-        rad_local = np.ceil(np.repeat(radius, 3)/np.diag(self.wrd2loc)[:3])
+        # diag(wrd2loc) = 1/step_size, so multiply to get radius in grid-step units
+        rad_local = np.ceil(np.repeat(radius, 3) * np.abs(np.diag(self.wrd2loc)[:3]))
         # Find the closest voxel
         cube_origin = np.floor(loc_point)
         deltas = cubrepos - (cube_origin[np.newaxis, :] - cube_origin)
@@ -452,8 +453,10 @@ class CubeData:
         nsteps = rad_local*2+1
         for i in range(3):
             if minpos[i] < 0:
-                nsteps[i] += minpos[i] 
+                nsteps[i] += minpos[i]
                 minpos[i] = 0
+            if minpos[i] + nsteps[i] > self.npts[i]:
+                nsteps[i] = self.npts[i] - minpos[i]
         # print(minpos, nsteps)
         box = np.mgrid[0:nsteps[0]:1,
                        0:nsteps[1]:1,

@@ -1,4 +1,3 @@
-import os
 import random
 import numpy as np
 import typing as tp
@@ -61,6 +60,33 @@ def molecular_voxels(cubefile: CubeData, maxthresh: float = 1.5, minthresh: floa
         if tmp_index:
             res.extend(tmp_index)
     return list(set(res))
+
+def vdw_boolean_mask(cubefile: CubeData, thresh: float = 1.0) -> np.ndarray:
+    """Returns a boolean array with True for voxels inside the VDW surface
+    and False outside.
+
+    Args:
+        cubefile (CubeData): cube data object containing atomic positions and grid.
+        thresh (float, optional): scaling factor applied to the VDW radius.
+            Values > 1 expand the surface, < 1 shrink it. Defaults to 1.0.
+
+    Returns:
+        np.ndarray: boolean array of shape (npts[0]*npts[1]*npts[2],),
+            True inside the VDW surface of any atom, False outside.
+    """
+    if not cubefile.box.size:
+        cubefile.make_box()
+    ntotal = cubefile.npts[0] * cubefile.npts[1] * cubefile.npts[2]
+    mask = np.zeros(ntotal, dtype=bool)
+    radii = [atomic_data(int(x))[int(x)]['rvdw'] / PHYSFACT.bohr2ang * thresh
+             for x in cubefile.ian]
+    print(radii)
+    for i in range(cubefile.crd.shape[0]):
+        indices = cubefile.indexinsphere(cubefile.crd[i], radii[i])
+        if indices.size:
+            mask[indices] = True
+    return mask
+
 
 def sample_molecular_volume(cubefile: CubeData, npoints: int, scale: float = 1.5) -> np.ndarray:
     """Sample points within the molecular volume defined by the VDW radii
@@ -355,6 +381,7 @@ class VibMolecule(Molecule):
         count = len(self._vtcd)
         self._vtcd.clear()
         return count
+
 
 
 class EleMolecule(Molecule):

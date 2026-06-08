@@ -1486,8 +1486,8 @@ class StreamLineSetupDialog(QDialog, _ClipPlaneMixin):
         scalevdwval = QDoubleValidator()
         scalevdwval.setLocale(QLocale('English'))
         scalevdwval.setRange(.2, 5.)
-        self._scalevdw = EditDoubleLine("VDW radius scaling", scalevdw, scalevdwval)
-        grid.addItem(self._scalevdw._hlay, 6, 1)
+        self._scalevdw_edit = EditDoubleLine("VDW radius scaling", scalevdw, scalevdwval)
+        grid.addItem(self._scalevdw_edit._hlay, 6, 1)
         particlevalid = QIntValidator()
         particlevalid.setLocale(QLocale('English'))
         particlevalid.setRange(1, 50)  # Reasonable range for particles
@@ -1532,7 +1532,7 @@ class StreamLineSetupDialog(QDialog, _ClipPlaneMixin):
         """Update UI controls based on selected sampling method"""
         ellipsoid_selected = self._ellipsoid_radio.isChecked()
         self._scalemol._line.setEnabled(ellipsoid_selected)
-        self._scalevdw._line.setEnabled(not ellipsoid_selected)
+        self._scalevdw_edit._line.setEnabled(not ellipsoid_selected)
         
         # Update sampling method
         self._sampling_method = "ellipsoid" if ellipsoid_selected else "molvolume"
@@ -1561,8 +1561,8 @@ class StreamLineSetupDialog(QDialog, _ClipPlaneMixin):
         if self._scalemol.edit:
             self._recalseeds = True
             self._redrawstream = True
-        scalevdw_value = self._scalevdw._getvalue()
-        if self._scalevdw.edit:
+        scalevdw_value = self._scalevdw_edit._getvalue()
+        if self._scalevdw_edit.edit:
             self._recalseeds = True
             self._redrawstream = True
         self._scalevdw = scalevdw_value
