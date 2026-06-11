@@ -2,7 +2,9 @@ import random
 import numpy as np
 import typing as tp
 from estampes.data.atom import atomic_data
-# from estampes.tools.atom import convert_labsymb
+from estampes.tools.atom import convert_labsymb
+# from estampes.visual.povrender import build_box, set_cam_depth, write_pov_head, write_pov_mol
+from estampes.visual.povrender import write_pov_mol, MAT_PLASTIC, MAT_GLASS, MAT_METAL
 from estampes.data.physics import PHYSFACT, phys_fact
 from tcdlibx.utils.var_tools import getellipsoid
 from tcdlibx.calc.cube_manip import AimCubeData, CubeData, VecCubeData, VtcdData
@@ -58,6 +60,33 @@ def molecular_voxels(cubefile: CubeData, maxthresh: float = 1.5, minthresh: floa
         if tmp_index:
             res.extend(tmp_index)
     return list(set(res))
+
+def vdw_boolean_mask(cubefile: CubeData, thresh: float = 1.0) -> np.ndarray:
+    """Returns a boolean array with True for voxels inside the VDW surface
+    and False outside.
+
+    Args:
+        cubefile (CubeData): cube data object containing atomic positions and grid.
+        thresh (float, optional): scaling factor applied to the VDW radius.
+            Values > 1 expand the surface, < 1 shrink it. Defaults to 1.0.
+
+    Returns:
+        np.ndarray: boolean array of shape (npts[0]*npts[1]*npts[2],),
+            True inside the VDW surface of any atom, False outside.
+    """
+    if not cubefile.box.size:
+        cubefile.make_box()
+    ntotal = cubefile.npts[0] * cubefile.npts[1] * cubefile.npts[2]
+    mask = np.zeros(ntotal, dtype=bool)
+    radii = [atomic_data(int(x))[int(x)]['rvdw'] / PHYSFACT.bohr2ang * thresh
+             for x in cubefile.ian]
+    print(radii)
+    for i in range(cubefile.crd.shape[0]):
+        indices = cubefile.indexinsphere(cubefile.crd[i], radii[i])
+        if indices.size:
+            mask[indices] = True
+    return mask
+
 
 def sample_molecular_volume(cubefile: CubeData, npoints: int, scale: float = 1.5) -> np.ndarray:
     """Sample points within the molecular volume defined by the VDW radii
@@ -354,6 +383,7 @@ class VibMolecule(Molecule):
         return count
 
 
+
 class EleMolecule(Molecule):
     """ Class to store data related to electronic transitions """
     def __init__(self, data):
@@ -553,6 +583,55 @@ def fibonacci_spiral_samples_on_unit_sphere(nb_samples: int, mode: int = 0) -> n
         j += 1
     return ss
 
+def write_molecule_pov(mol_myvtkactor: 'MyvtkActor', filename: str) -> None:
+    """Append the molecular information to an existing POV-Ray file using estampes.
+
+    Atom positions and types are read from the VTK actor to match the scene
+    orientation. Bonds that were excluded (order 0) are also skipped.
+
+    Args:
+        mol_myvtkactor: MyvtkActor returned by fillmolecule / fillmolecule_custom.
+        filename: Path to the VTK scene .pov file; 
+    """
+
+    vtk_mol = mol_myvtkactor.actor.GetMapper().GetInput()  # vtkMolecule
+    n_atoms = vtk_mol.GetNumberOfAtoms()
+    n_bonds = vtk_mol.GetNumberOfBonds()
+
+    atnums = []
+    positions = []
+    for i in range(n_atoms):
+        atom = vtk_mol.GetAtom(i)
+        atnums.append(int(atom.GetAtomicNumber()))
+        pos = atom.GetPosition()
+        positions.append([pos[0], pos[1], pos[2]])
+
+    at_lab = convert_labsymb(True, *atnums)
+    at_crd = np.array(positions) # * PHYSFACT.bohr2ang
+
+    bonds = []
+    for i in range(n_bonds):
+        if vtk_mol.GetBondOrder(i) == 0:
+            continue
+        bond = vtk_mol.GetBond(i)
+        bonds.append((bond.GetBeginAtomId(), bond.GetEndAtomId()))
+
+    # estampes write_pov_mol internally writes <col0, col2, col1>
+    # to convert right-handed chemistry to POV-Ray's left-handed system.
+    # Pre-swap Y Z here so the swap cancels out, preserving the original
+    # VTK orientation (molecular Y up, molecular Z as depth).
+    at_crd_ps = at_crd[:, [0, 2, 1]]
+
+    # box = build_box(at_lab, at_crd_ps)
+    # cam_depth = set_cam_depth(box)
+
+    with open(filename, 'a', encoding='utf-8') as fobj:
+        fobj.write(MAT_PLASTIC)
+        fobj.write(MAT_GLASS)
+        fobj.write(MAT_METAL)
+        write_pov_mol(fobj, 1, at_lab, at_crd_ps, bonds, col_bond_as_atom=True)
+
+
 DEFAULT_PARAMETERS = {'isoval': {'iso': 0.01},
                          'vfield': {'vfmax': 1e2,
                                     'vfmin': 1e5,
@@ -567,11 +646,15 @@ DEFAULT_PARAMETERS = {'isoval': {'iso': 0.01},
                                     'showbar': False,
                                     'animate_particles': False,
                                     'num_particles': 15,
-                                    'particle_type': 'sphere'},
+                                    'particle_type': 'sphere',
+                                    'enable_clipping': False,
+                                    'clip_bounds': {}},
                          'quiver': {'scale': 100,
                                    'subsample': 5,
                                    'lower': 0.0001,
-                                   'upper': 0.01},
+                                   'upper': 0.01,
+                                   'enable_clipping': False,
+                                   'clip_bounds': {}},
                          'nmconfig': {'invert_phase': False,
                                      'scale_factor': 1.0,
                                      'color': (0.0, 0.0, 1.0)},

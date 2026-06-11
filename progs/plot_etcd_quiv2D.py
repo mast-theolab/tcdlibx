@@ -71,11 +71,12 @@ def build_parser():
                       default='quiver',
                       help='''Type of representation of vecfield:
                       quiver/streamline/animatedstreamline''')
-
     draw.add_argument('--figext', type=str,
                       choices=('pdf', 'eps', 'png'),
                       default='pdf',
                       help='Figure extension')
+    draw.add_argument('--dpi', type=int, default=100,
+                      help='Resolution in DPI for the saved figure (default: 100; use 300 for print quality PNG)')
     # Quiver parameters
     quiver = par.add_argument_group('Quiver Parameters')
     quiver.add_argument('--quivbkg', action='store_true',
@@ -182,10 +183,10 @@ Coordinates (in Bohr)
             bkg = True
         QUIV = cbplt.quiver_plt(ax0, cubdat, OPTS.axis, OPTS.vscale, background=bkg,
                                 clim=clim, subsample=OPTS.subsample)
-        fig0.savefig(os.path.join(resfolder, 'quiv2D_axis{}.{}'.format(OPTS.axis, OPTS.figext)))
+        fig0.savefig(os.path.join(resfolder, 'quiv2D_axis{}.{}'.format(OPTS.axis, OPTS.figext)), dpi=OPTS.dpi)
     elif OPTS.type == 'stream':
         STRM = cbplt.stream_plt(ax0, cubdat, OPTS.axis)
-        fig0.savefig(os.path.join(resfolder, 'stream2D_axis{}.{}'.format(OPTS.axis, OPTS.figext)))
+        fig0.savefig(os.path.join(resfolder, 'stream2D_axis{}.{}'.format(OPTS.axis, OPTS.figext)), dpi=OPTS.dpi)
     else:
         STRM = cbplt.stream2_plt(ax0, cubdat, OPTS.axis)
         if OPTS.type == 'animated_stream':
@@ -193,7 +194,7 @@ Coordinates (in Bohr)
             plt.show()
         else:
             fig0.savefig(os.path.join(resfolder,
-                                          'stream2D_axis{}.{}'.format(OPTS.axis, OPTS.figext)))
+                                          'stream2D_axis{}.{}'.format(OPTS.axis, OPTS.figext)), dpi=OPTS.dpi)
         plt.close()
 
 
@@ -203,7 +204,7 @@ Coordinates (in Bohr)
     #                   scale=OPTS.vscale, cmap=colma,
     #                   zorder=3)
     
-    fig0.savefig(os.path.join(resfolder, 'etcd_quiv2D.pdf'))
+    fig0.savefig(os.path.join(resfolder, 'etcd_quiv2D.pdf'), dpi=OPTS.dpi)
     plt.close()
     print('2D plot saved as {}'.format(os.path.join(resfolder, 'etcd_quiv2D.pdf')))
 

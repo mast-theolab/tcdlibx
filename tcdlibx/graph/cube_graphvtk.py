@@ -87,6 +87,173 @@ def create_vector_field_polydata(positions: np.ndarray,
     return polydata
 
 
+def apply_spatial_clipping(grid_data: vtk.vtkImageData,
+                           clip_bounds: dict[str, float | None]) -> vtk.vtkImageData:
+    """
+    Apply spatial clipping to VTK ImageData using coordinate bounds.
+    
+    Args:
+        grid_data: Input VTK ImageData to clip
+        clip_bounds: Dictionary with coordinate bounds, e.g.:
+                    {'xmin': -5.0, 'xmax': 5.0, 'ymin': None, 'ymax': 3.0, ...}
+                    None values indicate no limit in that direction
+    
+    Returns:
+        Clipped VTK ImageData
+    """
+    if not clip_bounds:
+        return grid_data
+    
+    # Get grid dimensions and bounds
+    dimensions = grid_data.GetDimensions()
+    bounds = grid_data.GetBounds()  # [xmin, xmax, ymin, ymax, zmin, zmax]
+    
+    # Calculate grid spacing
+    dx = (bounds[1] - bounds[0]) / max(1, dimensions[0] - 1)
+    dy = (bounds[3] - bounds[2]) / max(1, dimensions[1] - 1) 
+    dz = (bounds[5] - bounds[4]) / max(1, dimensions[2] - 1)
+    
+    # Convert coordinate bounds to grid indices
+    def coord_to_index(coord, bounds_min, spacing, max_index):
+        """Convert coordinate to grid index, clamped to valid range"""
+        if coord is None:
+            return None
+        index = int((coord - bounds_min) / spacing)
+        return max(0, min(index, max_index))
+    
+    # Calculate index bounds for each axis
+    imin = coord_to_index(clip_bounds.get('xmin'), bounds[0], dx, dimensions[0] - 1)
+    imax = coord_to_index(clip_bounds.get('xmax'), bounds[0], dx, dimensions[0] - 1)
+    jmin = coord_to_index(clip_bounds.get('ymin'), bounds[2], dy, dimensions[1] - 1)
+    jmax = coord_to_index(clip_bounds.get('ymax'), bounds[2], dy, dimensions[1] - 1)
+    kmin = coord_to_index(clip_bounds.get('zmin'), bounds[4], dz, dimensions[2] - 1)
+    kmax = coord_to_index(clip_bounds.get('zmax'), bounds[4], dz, dimensions[2] - 1)
+    
+    # Use default bounds if not specified
+    if imin is None:
+        imin = 0
+    if imax is None:
+        imax = dimensions[0] - 1
+    if jmin is None:
+        jmin = 0
+    if jmax is None:
+        jmax = dimensions[1] - 1
+    if kmin is None:
+        kmin = 0
+    if kmax is None:
+        kmax = dimensions[2] - 1
+    
+    # Ensure max >= min for each axis
+    if imax < imin:
+        imax = imin
+    if jmax < jmin:
+        jmax = jmin
+    if kmax < kmin:
+        kmax = kmin
+    
+    # Use vtkExtractVOI for vtkImageData
+    extract_filter = vtk.vtkExtractVOI()
+    extract_filter.SetInputData(grid_data)
+    extract_filter.SetVOI(imin, imax, jmin, jmax, kmin, kmax)
+    extract_filter.Update()
+    return extract_filter.GetOutput()
+
+
+def create_clip_plane_actors(
+    scene_bounds: tuple[float, float, float, float, float, float],
+    initial_values: dict[str, float],
+) -> tuple[dict[str, "vtk.vtkActor"], dict[str, "vtk.vtkPlaneSource"]]:
+    """Create six semi-transparent plane actors for clip-bound preview.
+
+    One actor per bound key (``'xmin'``, ``'xmax'``, ``'ymin'``, ``'ymax'``,
+    ``'zmin'``, ``'zmax'``).  Yellow = min bound, Blue = max bound.
+    All actors are created with ``VisibilityOff()``.
+
+    Args:
+        scene_bounds: ``(xmin, xmax, ymin, ymax, zmin, zmax)`` of the VTK scene
+                      in Bohr, used as the extent of each plane.
+        initial_values: mapping from bound key to initial coordinate value;
+                        should cover all six keys.
+
+    Returns:
+        ``(actors, sources)`` — two dicts keyed by bound string, holding the
+        ``vtkActor`` and ``vtkPlaneSource`` respectively.
+    """
+    bnd = scene_bounds
+    colors = {
+        'xmin': (1.0, 1.0, 0.0), 'xmax': (0.0, 0.0, 1.0),
+        'ymin': (1.0, 1.0, 0.0), 'ymax': (0.0, 0.0, 1.0),
+        'zmin': (1.0, 1.0, 0.0), 'zmax': (0.0, 0.0, 1.0),
+    }
+    actors: dict[str, vtk.vtkActor] = {}
+    sources: dict[str, vtk.vtkPlaneSource] = {}
+
+    for key in ('xmin', 'xmax', 'ymin', 'ymax', 'zmin', 'zmax'):
+        source = vtk.vtkPlaneSource()
+        source.SetResolution(10, 10)
+        val = initial_values[key]
+        axis = key[0]
+        if axis == 'x':
+            source.SetOrigin(val, bnd[2], bnd[4])
+            source.SetPoint1(val, bnd[3], bnd[4])
+            source.SetPoint2(val, bnd[2], bnd[5])
+        elif axis == 'y':
+            source.SetOrigin(bnd[0], val, bnd[4])
+            source.SetPoint1(bnd[1], val, bnd[4])
+            source.SetPoint2(bnd[0], val, bnd[5])
+        else:  # 'z'
+            source.SetOrigin(bnd[0], bnd[2], val)
+            source.SetPoint1(bnd[1], bnd[2], val)
+            source.SetPoint2(bnd[0], bnd[3], val)
+        source.Update()
+
+        mapper = vtk.vtkPolyDataMapper()
+        mapper.SetInputConnection(source.GetOutputPort())
+        actor = vtk.vtkActor()
+        actor.SetMapper(mapper)
+        r, g, b = colors[key]
+        actor.GetProperty().SetColor(r, g, b)
+        actor.GetProperty().SetOpacity(0.35)
+        actor.GetProperty().LightingOff()
+        actor.VisibilityOff()
+
+        sources[key] = source
+        actors[key] = actor
+
+    return actors, sources
+
+
+def move_clip_plane(
+    source: "vtk.vtkPlaneSource",
+    key: str,
+    val: float,
+    scene_bounds: tuple[float, float, float, float, float, float],
+) -> None:
+    """Update the geometry of a single clip-plane source.
+
+    Args:
+        source: the ``vtkPlaneSource`` to update.
+        key: bound key (``'xmin'``, ``'xmax'``, ``'ymin'``, etc.).
+        val: new coordinate value in Bohr.
+        scene_bounds: ``(xmin, xmax, ymin, ymax, zmin, zmax)`` of the scene.
+    """
+    bnd = scene_bounds
+    axis = key[0]
+    if axis == 'x':
+        source.SetOrigin(val, bnd[2], bnd[4])
+        source.SetPoint1(val, bnd[3], bnd[4])
+        source.SetPoint2(val, bnd[2], bnd[5])
+    elif axis == 'y':
+        source.SetOrigin(bnd[0], val, bnd[4])
+        source.SetPoint1(bnd[1], val, bnd[4])
+        source.SetPoint2(bnd[0], val, bnd[5])
+    else:  # 'z'
+        source.SetOrigin(bnd[0], bnd[2], val)
+        source.SetPoint1(bnd[1], bnd[2], val)
+        source.SetPoint2(bnd[0], bnd[3], val)
+    source.Modified()
+
+
 def fillcubeimage(data: CubeData, vec: bool = True, logscale: bool = False, aslist: bool = False) -> vtk.vtkImageData | list:
     """
     Fills a vtkImageData object
@@ -320,9 +487,10 @@ def quiv3d(
     logscale: bool = False,
     subsample_factor: int | None = None,
     glyphmode: str = 'arrow',
+    clip_bounds: dict[str, float | None] | None = None
 ) -> MyvtkActor:
     """
-    Return a vtk actor with 3D quiver plot
+    Return a vtk actor with 3D quiver plot with optional spatial clipping
 
     Args:
         vecdata: VecCubeData object or vtkPolyData with vector field
@@ -330,6 +498,8 @@ def quiv3d(
         scale: scale factor for arrows
         logscale: if True, use logarithmic scaling
         subsample_factor: if provided, show only every nth vector for better performance
+        glyphmode: 'arrow' or 'cone' for glyph type
+        clip_bounds: dict with xmin, xmax, ymin, ymax, zmin, zmax for spatial clipping
 
     Returns:
         MyvtkActor with quiver plot
@@ -343,6 +513,10 @@ def quiv3d(
 
     _grid.GetPointData().SetActiveVectors('vector')
     _grid.GetPointData().SetActiveScalars('scalar')
+    
+    # Apply spatial clipping if requested
+    if clip_bounds is not None and isinstance(vecdata, VecCubeData):
+        _grid = apply_spatial_clipping(_grid, clip_bounds)
 
     # Apply subsampling if requested
     # Only apply subsampling for VecCubeData
@@ -574,20 +748,24 @@ def fillstreamline(cubdata: CubeData,
                    clipping: tuple[float, float] = (1e2, 1e5),
                    minspeed: float | None = None,
                    seeds: np.ndarray | None = None,
-                   scale_rad: float = 1) -> MyvtkActor:
-    """_summary_
+                   scale_rad: float = 1,
+                   clip_bounds: dict[str, float | None] | None = None) -> MyvtkActor:
+    """Generate streamlines from vector field with optional spatial clipping.
 
     Args:
-        cubdata (CubeData): _description_
-        nseeds (tp.Optional[int], optional): _description_. Defaults to 150.
-        center (tp.Optional[list], optional): _description_. Defaults to [0., 0., 0.].
-        opacity (tp.Optional[float], optional): _description_. Defaults to 0.3.
-        clipping (tp.Optional[tuple], optional): _description_. Defaults to (1e2, 1e5).
-        minvel (tp.Optional[tp.Union[float, None]], optional): _description_. Defaults to None.
-        scale_rad (int, optional): _description_. Defaults to 1.
+        cubdata (CubeData): Vector field cube data
+        nseeds (int, optional): Number of seed points. Defaults to 150.
+        center (list, optional): Center for seed distribution. Defaults to [0., 0., 0.].
+        opacity (float, optional): Streamline opacity. Defaults to 0.3.
+        clipping (tuple, optional): Magnitude clipping bounds. Defaults to (1e2, 1e5).
+        minspeed (float | None, optional): Minimum speed for termination. Defaults to None.
+        seeds (np.ndarray | None, optional): Custom seed points. Defaults to None.
+        scale_rad (int, optional): Radius scaling factor. Defaults to 1.
+        clip_bounds (dict[str, float | None] | None, optional): 
+            Spatial clipping bounds with keys: xmin, xmax, ymin, ymax, zmin, zmax. Defaults to None.
 
     Returns:
-        vtk.vtkActor: _description_
+        MyvtkActor: VTK actor containing streamlines and optional clipped data reference
     """
 
     # Vectors stuff
@@ -595,7 +773,13 @@ def fillstreamline(cubdata: CubeData,
     _grid = fillcubeimage(cubdata)
     _grid.GetPointData().SetActiveVectors('vector')
     _grid.GetPointData().SetActiveScalars('scalar')
-    _bounds = _grid.GetScalarRange()
+    
+    # Apply spatial clipping if requested
+    clipped_grid = _grid
+    if clip_bounds is not None:
+        clipped_grid = apply_spatial_clipping(_grid, clip_bounds)
+    
+    _bounds = clipped_grid.GetScalarRange()
     # visualizing only a portion between the two bounds
     _bounds2 = (_bounds[1]/clipping[1],
                 _bounds[1]/clipping[0])
@@ -617,7 +801,7 @@ def fillstreamline(cubdata: CubeData,
     # Streamlines stuff
     integrator=vtk.vtkRungeKutta45()
     streamline = vtk.vtkStreamTracer()
-    streamline.SetInputData(_grid)
+    streamline.SetInputData(clipped_grid)  # Use clipped grid
     if _flag:
         streamline.SetSourceConnection(_seeds.GetOutputPort())
     else:
@@ -1269,6 +1453,8 @@ class StreamlineParticleAnimator:
         """
         if hasattr(self, 'ren') and self.ren is not None:
             self.ren.GetRenderWindow().Render()
+
+
 
 
 def create_streamline_particles(renderer: vtk.vtkRenderer, 

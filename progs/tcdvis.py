@@ -24,10 +24,10 @@ from PySide6.QtWidgets import (
 
 # Local imports - tcdlibx package
 from tcdlibx.calc.cube_manip import VecCubeData, VtcdData, cube_parser
-from tcdlibx.graph.helpers import EleMolecule, VibMolecule, filtervecatom, sample_molecular_volume, DEFAULT_PARAMETERS
+from tcdlibx.graph.helpers import EleMolecule, VibMolecule, filtervecatom, sample_molecular_volume, DEFAULT_PARAMETERS, write_molecule_pov, vdw_boolean_mask
 import tcdlibx.graph.cube_graphvtk as cubetk
 from tcdlibx.gui.dialogs import (
-    SavePngDialog, SavePngSeriesDialog, StreamLineSetupDialog, TCDDialog, QuiverSetupDialog, SaveSceneDialog, NMConfigDialog, MoleculeConfigDialog
+    SavePngDialog, SavePngSeriesDialog, StreamLineSetupDialog, TCDDialog, QuiverSetupDialog, SaveSceneDialog, ExportPOVDialog, NMConfigDialog, MoleculeConfigDialog
 )
 from tcdlibx.io.estp_io import PHYSFACT, get_elemol, get_vibmol
 from tcdlibx.io.jsonio import read_json, write_json
@@ -135,6 +135,11 @@ class TCDvis(QMainWindow):
         ssceneButton.setStatusTip('Save a VKScene in a JSON file')
         ssceneButton.triggered.connect(self.save_scene)
         fileMenu.addAction(ssceneButton)
+        # Export scene as POV-Ray file
+        exportPOVButton = QAction(QIcon(''), 'ExportScenePOV', self)
+        exportPOVButton.setStatusTip('Export the current scene to a POV-Ray file')
+        exportPOVButton.triggered.connect(self.export_scene_pov)
+        fileMenu.addAction(exportPOVButton)
 
         ## Exit
         exitButton = QAction(QIcon('exit24.png'), 'Exit', self)
@@ -722,6 +727,20 @@ class TCDvis(QMainWindow):
 
     def _fieldstp(self):
         current_prop = self.prop.currentText().lower()
+
+        # Compute field bounding box for clip-plane preview in setup dialogs
+        try:
+            _tcd_bnd = self._fchk.get_tcd(self._activest)
+            _orig = _tcd_bnd.loc2wrd[:3, 3]
+            _spac = np.diag(_tcd_bnd.loc2wrd[:3, :3])
+            _ends = _orig + (np.array(_tcd_bnd.npts) - 1) * _spac
+            _vtk_bounds = (
+                float(min(_orig[0], _ends[0])), float(max(_orig[0], _ends[0])),
+                float(min(_orig[1], _ends[1])), float(max(_orig[1], _ends[1])),
+                float(min(_orig[2], _ends[2])), float(max(_orig[2], _ends[2])),
+            )
+        except Exception:
+            _vtk_bounds = None
         
         if current_prop == "streamlines":
             # Handle streamlines setup dialog
@@ -740,7 +759,12 @@ class TCDvis(QMainWindow):
                                              num_particles=self._default["vfield"]["num_particles"],
                                              particle_type=self._default["vfield"]["particle_type"],
                                              sampling_method=self._default["vfield"]["sampling_method"],
-                                             scalevdw=self._default["vfield"]["scalevdw"],)
+                                             scalevdw=self._default["vfield"]["scalevdw"],
+                                             enable_clipping=self._default["vfield"]["enable_clipping"],
+                                             clip_bounds=self._default["vfield"]["clip_bounds"],
+                                             vtk_renderer=self.ren,
+                                             vtk_render_window=self.vtkWidget.GetRenderWindow(),
+                                             vtk_scene_bounds=_vtk_bounds)
             fieldprm.exec()
             # Update the default values
             self._default["vfield"]["vfmax"] = fieldprm._vfmax
@@ -773,6 +797,8 @@ class TCDvis(QMainWindow):
             self._default["vfield"]["animate_particles"] = fieldprm._animate_particles
             self._default["vfield"]["num_particles"] = fieldprm._num_particles
             self._default["vfield"]["particle_type"] = fieldprm._particle_type
+            self._default["vfield"]["enable_clipping"] = fieldprm._enable_clipping
+            self._default["vfield"]["clip_bounds"] = fieldprm._clip_bounds
             
             # Handle streamline-specific actors
             if 'tcd' in self._actors:
@@ -826,7 +852,8 @@ class TCDvis(QMainWindow):
                         self._actors['tcddir'] = cubetk.quiv3d(tmp_cube, 
                                                scale=self._default["quiver"]["scale"]/5,
                                                subsample_factor=100,
-                                               glyphmode='cone')
+                                               glyphmode='cone',
+                                               clip_bounds=self._default["vfield"]["clip_bounds"] if self._default["vfield"]["enable_clipping"] else None)
                         self.ren.AddActor(self._actors['tcddir'].actor)
                     elif 'tcddir' in self._actors:
                         self.ren.RemoveActor(self._actors['tcddir'].actor)
@@ -857,12 +884,19 @@ class TCDvis(QMainWindow):
             # Handle quiver setup dialog
             quiverprm = QuiverSetupDialog(scale=self._default["quiver"]["scale"],
                                          subsamp=self._default["quiver"]["subsample"],
+                                         enable_clipping=self._default["quiver"]["enable_clipping"],
+                                         clip_bounds=self._default["quiver"]["clip_bounds"],
+                                         vtk_renderer=self.ren,
+                                         vtk_render_window=self.vtkWidget.GetRenderWindow(),
+                                         vtk_scene_bounds=_vtk_bounds,
                                          lower=self._default["quiver"]["lower"],
                                          upper=self._default["quiver"]["upper"])
             quiverprm.exec()
             # Update the default values
             self._default["quiver"]["scale"] = quiverprm._scale
             self._default["quiver"]["subsample"] = quiverprm._subsamp
+            self._default["quiver"]["enable_clipping"] = quiverprm._enable_clipping
+            self._default["quiver"]["clip_bounds"] = quiverprm._clip_bounds
             self._default["quiver"]["lower"] = quiverprm._lower
             self._default["quiver"]["upper"] = quiverprm._upper
             
@@ -1036,6 +1070,11 @@ class TCDvis(QMainWindow):
                 print(f"Added unlisted atoms to additional fragment: {[x+1 for x in unlisted_list]}")
             
             self._fchk.set_fragment(res)
+            if self._fchk._aimdata is not None:
+                if self._moltype == 'ele':
+                    self._menus['etcd']['saim'].setEnabled(True)
+                elif self._moltype == 'vib':
+                    self._menus['vtcd']['saim'].setEnabled(True)
             if (self._fchk._aimdata is not None and 
                 self._activest in self._fchk.avail_tcd()):
                 if self._moltype == 'ele':
@@ -1257,7 +1296,8 @@ class TCDvis(QMainWindow):
                                                          clipping=(self._default["vfield"]["vfmax"],
                                                                     self._default["vfield"]["vfmin"]),
                                                          minspeed=self._default["vfield"]["mspeed"],
-                                                         seeds=self._seeds)
+                                                         seeds=self._seeds,
+                                                         clip_bounds=self._default["vfield"]["clip_bounds"] if self._default["vfield"]["enable_clipping"] else None)
             if self._default["vfield"]["showbar"]:
                 self._actors['tcdbar'] = cubetk.draw_colorbar(self._actors['tcd'].actor, "Norm(J)")
             if self._default["vfield"]["showdir"]:
@@ -1269,7 +1309,8 @@ class TCDvis(QMainWindow):
                 self._actors['tcddir'] = cubetk.quiv3d(tmp_cube, 
                                                scale=self._default["quiver"]["scale"]/5,
                                                subsample_factor=100,
-                                               glyphmode='cone')
+                                               glyphmode='cone',
+                                               clip_bounds=self._default["vfield"]["clip_bounds"] if self._default["vfield"]["enable_clipping"] else None)
             
             # Add animated particles if enabled
             if self._default["vfield"]["animate_particles"]:
@@ -1294,7 +1335,8 @@ class TCDvis(QMainWindow):
                                                lower=self._default["quiver"]["lower"],
                                                upper=self._default["quiver"]["upper"],
                                                scale=self._default["quiver"]["scale"],
-                                               subsample_factor=self._default["quiver"]["subsample"])
+                                               subsample_factor=self._default["quiver"]["subsample"],
+                                               clip_bounds=self._default["quiver"]["clip_bounds"] if self._default["quiver"]["enable_clipping"] else None)
         elif prop_cur == "moe":
             if self._moltype == 'ele':
                 vec = tmp_cube.integrate() / self._fchk.get_exeng(self._activest)
@@ -1502,7 +1544,9 @@ class TCDvis(QMainWindow):
         if saim_checked:
             ind = self._fchk.avail_tcd()[0]
             tmp_cube = self._fchk.get_tcd(ind).get_frag_isosurf()
-            tmp_cube.loc2wrd *=  PHYSFACT.bohr2ang 
+            _mask = vdw_boolean_mask(tmp_cube, thresh=2)
+            tmp_cube.loc2wrd *=  PHYSFACT.bohr2ang
+            tmp_cube.cube = np.where(_mask, tmp_cube.cube, -1e10)  # Mask out values outside the vdW surface
             colors = self._fchk.get_frag_colors()
             grids = cubetk.fillcubeimage(tmp_cube, vec=False, aslist=True)
             
@@ -1560,6 +1604,13 @@ class TCDvis(QMainWindow):
         res['Camera:ClippingRange'] = camera.GetClippingRange()
         res['Used parameters'] = self._default
         write_json(res, fname)
+
+    def export_scene_pov(self):
+        dlg = ExportPOVDialog(parent=self)
+        if dlg.exec() == ExportPOVDialog.Accepted:
+            if dlg.export(self.vtkWidget.GetRenderWindow()):
+                if 'mol' in self._actors:
+                    write_molecule_pov(self._actors['mol'], dlg._fname)
 
     def _batch_operations(self):
         """Performs batch operations on multiple files using a configuration JSON file.

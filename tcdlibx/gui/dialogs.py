@@ -1,11 +1,176 @@
 import os
 import typing as tp
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QGridLayout
-from PySide6.QtCore import QRegularExpression, QLocale, Qt
+from PySide6.QtCore import QRegularExpression, QLocale, Qt, QObject, QEvent
 from PySide6.QtGui import QRegularExpressionValidator, QIntValidator, QDoubleValidator
 from PySide6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QCheckBox, QComboBox
-from PySide6.QtWidgets import QLineEdit, QFileDialog, QPushButton, QMessageBox, QColorDialog, QSlider, QRadioButton, QButtonGroup
+from PySide6.QtWidgets import QLineEdit, QFileDialog, QPushButton, QMessageBox, QColorDialog, QSlider, QRadioButton, QButtonGroup, QFrame
 from tcdlibx.utils.var_tools import fuzzy_equal
+from tcdlibx.graph.cube_graphvtk import create_clip_plane_actors, move_clip_plane
+
+
+class _FocusFilter(QObject):
+    """Event filter that triggers *callback* when the watched widget receives keyboard focus."""
+    def __init__(self, callback, parent=None):
+        super().__init__(parent)
+        self._callback = callback
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.FocusIn:
+            self._callback()
+        return False
+
+
+class _ClipPlaneMixin:
+    """Mixin that adds semi-transparent VTK clip-plane preview actors to clipping dialogs.
+
+    Both *QuiverSetupDialog* and *StreamLineSetupDialog* inherit from this class.
+    The mixin expects the dialog to expose ``_xmin_input / _xmax_input / _ymin_input /
+    _ymax_input / _zmin_input / _zmax_input`` ``QLineEdit`` widgets and a
+    ``_preview_planes_checkbox`` ``QCheckBox`` (created by
+    :meth:`_setup_plane_preview_ui`).  Call order in ``__init__``:
+
+    1. ``_init_clip_planes(renderer, render_window, scene_bounds)``
+    2. Build the six bound ``QLineEdit`` widgets.
+    3. ``_setup_plane_preview_ui(enable_clipping)``  (returns the checkbox widget)
+    """
+
+    # ------------------------------------------------------------------
+    # Initialisation helpers
+    # ------------------------------------------------------------------
+
+    def _init_clip_planes(self, vtk_renderer, vtk_render_window, vtk_scene_bounds):
+        """Store VTK objects and initialise the plane-state containers."""
+        self._vtk_renderer = vtk_renderer
+        self._vtk_render_window = vtk_render_window
+        self._vtk_scene_bounds = vtk_scene_bounds  # (xmin,xmax, ymin,ymax, zmin,zmax)
+        self._plane_actors = {}   # key -> vtkActor
+        self._plane_sources = {}  # key -> vtkPlaneSource
+        self._planes_active = False
+
+    def _setup_plane_preview_ui(self, enable_clipping):
+        """Create the 'Preview clipping planes' checkbox and wire up all signals.
+
+        Returns the ``QCheckBox`` so the caller can add it to a layout.
+        """
+        has_vtk = (
+            self._vtk_renderer is not None
+            and self._vtk_scene_bounds is not None)
+        self._preview_planes_checkbox = QCheckBox("Preview clipping planes")
+        self._preview_planes_checkbox.setEnabled(enable_clipping and has_vtk)
+        self._preview_planes_checkbox.stateChanged.connect(self._toggle_preview_planes)
+
+        # Focus filters: when the user clicks into an axis' input the planes
+        # for that axis become visible.
+        self._x_focus_filter = _FocusFilter(lambda: self._on_axis_focus('x'), self)
+        self._y_focus_filter = _FocusFilter(lambda: self._on_axis_focus('y'), self)
+        self._z_focus_filter = _FocusFilter(lambda: self._on_axis_focus('z'), self)
+        self._xmin_input.installEventFilter(self._x_focus_filter)
+        self._xmax_input.installEventFilter(self._x_focus_filter)
+        self._ymin_input.installEventFilter(self._y_focus_filter)
+        self._ymax_input.installEventFilter(self._y_focus_filter)
+        self._zmin_input.installEventFilter(self._z_focus_filter)
+        self._zmax_input.installEventFilter(self._z_focus_filter)
+
+        # Live position updates while the user types
+        self._xmin_input.textChanged.connect(lambda _t: self._update_plane_position('xmin'))
+        self._xmax_input.textChanged.connect(lambda _t: self._update_plane_position('xmax'))
+        self._ymin_input.textChanged.connect(lambda _t: self._update_plane_position('ymin'))
+        self._ymax_input.textChanged.connect(lambda _t: self._update_plane_position('ymax'))
+        self._zmin_input.textChanged.connect(lambda _t: self._update_plane_position('zmin'))
+        self._zmax_input.textChanged.connect(lambda _t: self._update_plane_position('zmax'))
+
+        # Remove actors from the renderer whenever the dialog closes
+        self.finished.connect(lambda _: self._cleanup_planes())
+
+        return self._preview_planes_checkbox
+
+    # ------------------------------------------------------------------
+    # VTK plane management
+    # ------------------------------------------------------------------
+
+    def _get_plane_value(self, key):
+        """Return the float coordinate for *key*; fall back to the scene edge if empty."""
+        input_map = {
+            'xmin': self._xmin_input, 'xmax': self._xmax_input,
+            'ymin': self._ymin_input, 'ymax': self._ymax_input,
+            'zmin': self._zmin_input, 'zmax': self._zmax_input,
+        }
+        default_map = {
+            'xmin': self._vtk_scene_bounds[0], 'xmax': self._vtk_scene_bounds[1],
+            'ymin': self._vtk_scene_bounds[2], 'ymax': self._vtk_scene_bounds[3],
+            'zmin': self._vtk_scene_bounds[4], 'zmax': self._vtk_scene_bounds[5],
+        }
+        text = input_map[key].text().strip()
+        try:
+            return float(text) if text else default_map[key]
+        except ValueError:
+            return default_map[key]
+
+    def _create_clip_planes(self):
+        """Create six semi-transparent plane actors (hidden) and add to the renderer."""
+        if not self._vtk_renderer or not self._vtk_scene_bounds:
+            return
+        initial = {key: self._get_plane_value(key)
+                   for key in ('xmin', 'xmax', 'ymin', 'ymax', 'zmin', 'zmax')}
+        self._plane_actors, self._plane_sources = create_clip_plane_actors(
+            self._vtk_scene_bounds, initial)
+        for actor in self._plane_actors.values():
+            self._vtk_renderer.AddActor(actor)
+        self._planes_active = True
+        if self._vtk_render_window:
+            self._vtk_render_window.Render()
+
+    def _on_axis_focus(self, axis):
+        """Show the two planes for *axis*, hide the rest."""
+        if not self._preview_planes_checkbox.isChecked() or not self._planes_active:
+            return
+        for key, actor in self._plane_actors.items():
+            actor.SetVisibility(key[0] == axis)
+        if self._vtk_render_window:
+            self._vtk_render_window.Render()
+
+    def _update_plane_position(self, key):
+        """Move the plane *key* to the coordinate currently typed in its input field."""
+        if not self._planes_active or key not in self._plane_sources:
+            return
+        move_clip_plane(self._plane_sources[key], key,
+                        self._get_plane_value(key), self._vtk_scene_bounds)
+        if self._vtk_render_window:
+            self._vtk_render_window.Render()
+
+    def _toggle_preview_planes(self):
+        """Show / hide clip planes in response to the preview checkbox."""
+        if self._preview_planes_checkbox.isChecked():
+            if not self._planes_active:
+                self._create_clip_planes()
+            self._on_axis_focus('x')
+        else:
+            for actor in self._plane_actors.values():
+                actor.VisibilityOff()
+            if self._vtk_render_window:
+                self._vtk_render_window.Render()
+
+    def _cleanup_planes(self):
+        """Remove all clip-plane actors from the renderer (called on dialog close)."""
+        if self._vtk_renderer:
+            for actor in self._plane_actors.values():
+                self._vtk_renderer.RemoveActor(actor)
+            if self._planes_active and self._vtk_render_window:
+                self._vtk_render_window.Render()
+        self._plane_actors.clear()
+        self._plane_sources.clear()
+        self._planes_active = False
+
+    def _update_clipping_toggle(self, is_enabled):
+        """Helper called from ``_toggle_clipping`` to keep preview checkbox in sync."""
+        has_vtk = (
+            self._vtk_renderer is not None
+            and self._vtk_scene_bounds is not None)
+        self._preview_planes_checkbox.setEnabled(is_enabled and has_vtk)
+        if not is_enabled:
+            self._preview_planes_checkbox.setChecked(False)
+
 
 class SavePngDialog(QDialog):
     def __init__(self, parent=None, fname="tcdfigure.png", figure_size=None):
@@ -338,6 +503,96 @@ class SaveSceneDialog(QDialog):
             self.folderPath.setText(folder)
 
 
+class ExportPOVDialog(QDialog):
+    """Dialog for exporting the current VTK scene to a POV-Ray file via vtkPOVExporter."""
+
+    def __init__(self, parent=None, fname="scene.pov"):
+        super().__init__(parent)
+        self._fname = fname
+        self._okexit = False
+        self._folder = os.path.dirname(fname) if os.path.dirname(fname) else "."
+
+        self.setWindowTitle("Export POV-Ray Scene")
+
+        nameLabel = QLabel("POV-Ray filename:", self)
+        self.povname = QLineEdit(self)
+        pov_valid = QRegularExpressionValidator(
+            QRegularExpression(r'.*\.pov'), self)
+        self.povname.setValidator(pov_valid)
+        self.povname.setText(os.path.basename(self._fname))
+        self.povname.textEdited.connect(self._setcheck)
+
+        folderLabel = QLabel("Save in:", self)
+        self.folderPath = QLineEdit(self)
+        self.folderPath.setText(self._folder)
+        self.folderPath.setReadOnly(True)
+        self.browseButton = QPushButton("Browse...", self)
+        self.browseButton.clicked.connect(self._browse_folder)
+
+        grid = QGridLayout()
+        grid.addWidget(nameLabel, 0, 0)
+        grid.addWidget(self.povname, 0, 1, 1, 2)
+        grid.addWidget(folderLabel, 1, 0)
+        grid.addWidget(self.folderPath, 1, 1)
+        grid.addWidget(self.browseButton, 1, 2)
+
+        QBtn = QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        self.buttonBox = QDialogButtonBox(QBtn)
+        self.okbtn = self.buttonBox.button(QDialogButtonBox.Ok)
+        self.buttonBox.accepted.connect(self.accept)
+        self.accepted.connect(self._getfname)
+        self.buttonBox.rejected.connect(self.reject)
+
+        vlay = QVBoxLayout()
+        vlay.addLayout(grid)
+        vlay.addWidget(self.buttonBox)
+        self.setLayout(vlay)
+
+    def _getfname(self):
+        self._fname = os.path.join(self._folder, self.povname.text())
+        if os.path.exists(self._fname):
+            reply = QMessageBox.question(
+                self,
+                "File Exists",
+                f'The file "{os.path.basename(self._fname)}" already exists.\n\nOverwrite?',
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if reply == QMessageBox.No:
+                self._okexit = False
+                return
+        self._okexit = True
+
+    def _setcheck(self):
+        self.okbtn.setEnabled(self.povname.hasAcceptableInput())
+
+    def _browse_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, "Select Save Directory", self._folder)
+        if folder:
+            self._folder = folder
+            self.folderPath.setText(folder)
+
+    def export(self, render_window) -> bool:
+        """Run vtkPOVExporter on *render_window* using the confirmed filename.
+
+        Returns True on success, False if the dialog was cancelled or the
+        export failed.
+        """
+        if not self._okexit:
+            return False
+        try:
+            from vtkmodules.vtkIOExport import vtkPOVExporter
+        except ImportError:
+            QMessageBox.critical(self, "Missing module",
+                                 "vtkmodules.vtkIOExport is not available in this VTK build.")
+            return False
+        exporter = vtkPOVExporter()
+        exporter.SetRenderWindow(render_window)
+        exporter.SetFileName(self._fname)
+        exporter.Write()
+        return True
+
+
 class NMConfigDialog(QDialog):
     def __init__(self, parent=None, invert_phase=False, scale_factor=1.0, color=(1.0, 0.0, 0.0)):
         super().__init__(parent)
@@ -645,7 +900,7 @@ class EditIntLine():
     def edit(self):
         return self._edit
 
-class QuiverSetupDialog(QDialog):
+class QuiverSetupDialog(QDialog, _ClipPlaneMixin):
     """Dialog for setting up quiver plot parameters
 
     Args:
@@ -657,20 +912,30 @@ class QuiverSetupDialog(QDialog):
                  subsamp: int,
                  lower: float = 0.0001,
                  upper: float = 0.01,
+                 enable_clipping: bool = False,
+                 clip_bounds: tp.Optional[tp.Dict[str, tp.Optional[float]]] = None,
+                 vtk_renderer=None,
+                 vtk_render_window=None,
+                 vtk_scene_bounds: tp.Optional[tp.Tuple[float, ...]] = None,
                  parent: tp.Optional[tp.Union[QDialog, None]] = None) -> None:
         """ initialize the dialog. Requires a dictionary with the parameters,
             the maximum norm value in the field and optionally a parent dialog
 
         Args:
             scale (float): scaling factor for arrows
-            nseeds (int): Subsampling of the grid for arrows
+            subsamp (int): Subsampling of the grid for arrows
             lower (float): lower bound to filter arrows (vectors below this norm are hidden)
             upper (float): upper bound to filter arrows (vectors above this norm are clamped)
+            enable_clipping (bool): whether spatial clipping is enabled
+            clip_bounds (tp.Optional[tp.Dict[str, tp.Optional[float]]]): clipping bounds
             parent (tp.Optional[tp.Union[QDialog, None]]): Not required
         """
         super().__init__(parent)
         self._scale = scale
         self._subsamp = subsamp
+        self._enable_clipping = enable_clipping
+        self._clip_bounds = clip_bounds or {}
+        self._init_clip_planes(vtk_renderer, vtk_render_window, vtk_scene_bounds)
         self._lower = lower
         self._upper = upper
         self.setWindowTitle("Quiver Setup Dialog")
@@ -702,6 +967,75 @@ class QuiverSetupDialog(QDialog):
         grid.addWidget(message, 6, 0)
         grid.addLayout(self._upperline._hlay, 7, 0)
 
+        # Spatial clipping section
+        self._clipping_checkbox = QCheckBox("Enable Spatial Clipping")
+        self._clipping_checkbox.setChecked(enable_clipping)
+        self._clipping_checkbox.stateChanged.connect(self._toggle_clipping)
+        grid.addWidget(self._clipping_checkbox, 8, 0, 1, 2)
+        
+        # Create clipping controls group (initially hidden)
+        self._clipping_frame = QFrame()
+        self._clipping_frame.setFrameStyle(QFrame.StyledPanel)
+        clipping_layout = QGridLayout(self._clipping_frame)
+        
+        # X bounds
+        x_label = QLabel("X Range (Bohr):")
+        clipping_layout.addWidget(x_label, 0, 0)
+        
+        self._xmin_input = QLineEdit()
+        self._xmin_input.setPlaceholderText("xmin (leave empty for no limit)")
+        self._xmin_input.setText(str(self._clip_bounds.get('xmin', '')) if self._clip_bounds.get('xmin') is not None else '')
+        clipping_layout.addWidget(self._xmin_input, 0, 1)
+        
+        self._xmax_input = QLineEdit()
+        self._xmax_input.setPlaceholderText("xmax (leave empty for no limit)")
+        self._xmax_input.setText(str(self._clip_bounds.get('xmax', '')) if self._clip_bounds.get('xmax') is not None else '')
+        clipping_layout.addWidget(self._xmax_input, 0, 2)
+        
+        # Y bounds
+        y_label = QLabel("Y Range (Bohr):")
+        clipping_layout.addWidget(y_label, 1, 0)
+        
+        self._ymin_input = QLineEdit()
+        self._ymin_input.setPlaceholderText("ymin (leave empty for no limit)")
+        self._ymin_input.setText(str(self._clip_bounds.get('ymin', '')) if self._clip_bounds.get('ymin') is not None else '')
+        clipping_layout.addWidget(self._ymin_input, 1, 1)
+        
+        self._ymax_input = QLineEdit()
+        self._ymax_input.setPlaceholderText("ymax (leave empty for no limit)")
+        self._ymax_input.setText(str(self._clip_bounds.get('ymax', '')) if self._clip_bounds.get('ymax') is not None else '')
+        clipping_layout.addWidget(self._ymax_input, 1, 2)
+        
+        # Z bounds
+        z_label = QLabel("Z Range (Bohr):")
+        clipping_layout.addWidget(z_label, 2, 0)
+        
+        self._zmin_input = QLineEdit()
+        self._zmin_input.setPlaceholderText("zmin (leave empty for no limit)")
+        self._zmin_input.setText(str(self._clip_bounds.get('zmin', '')) if self._clip_bounds.get('zmin') is not None else '')
+        clipping_layout.addWidget(self._zmin_input, 2, 1)
+        
+        self._zmax_input = QLineEdit()
+        self._zmax_input.setPlaceholderText("zmax (leave empty for no limit)")
+        self._zmax_input.setText(str(self._clip_bounds.get('zmax', '')) if self._clip_bounds.get('zmax') is not None else '')
+        clipping_layout.addWidget(self._zmax_input, 2, 2)
+        
+        # Add double validators for coordinate inputs
+        coord_validator = QDoubleValidator()
+        coord_validator.setLocale(QLocale('English'))
+        for input_field in [self._xmin_input, self._xmax_input, self._ymin_input, 
+                           self._ymax_input, self._zmin_input, self._zmax_input]:
+            input_field.setValidator(coord_validator)
+        
+        # Add clipping frame to main layout
+        self.vlay.addWidget(self._clipping_frame)
+        
+        # Set initial visibility
+        self._clipping_frame.setVisible(enable_clipping)
+
+        # Clip-plane preview checkbox (enabled only when clipping and VTK are available)
+        self.vlay.addWidget(self._setup_plane_preview_ui(enable_clipping))
+
         QBtn = QDialogButtonBox.Ok | QDialogButtonBox.Cancel 
 
         self.buttonBox = QDialogButtonBox(QBtn)
@@ -718,6 +1052,35 @@ class QuiverSetupDialog(QDialog):
         self._subsamp = self._subsampline._getvalue()
         self._lower = self._lowerline._getvalue()
         self._upper = self._upperline._getvalue()
+        
+        # Handle spatial clipping bounds
+        self._enable_clipping = self._clipping_checkbox.isChecked()
+        if self._enable_clipping:
+            # Parse coordinate inputs, handling empty strings as None
+            def parse_float_or_none(text):
+                try:
+                    return float(text) if text.strip() else None
+                except (ValueError, AttributeError):
+                    return None
+            
+            self._clip_bounds = {
+                'xmin': parse_float_or_none(self._xmin_input.text()),
+                'xmax': parse_float_or_none(self._xmax_input.text()),
+                'ymin': parse_float_or_none(self._ymin_input.text()),
+                'ymax': parse_float_or_none(self._ymax_input.text()),
+                'zmin': parse_float_or_none(self._zmin_input.text()),
+                'zmax': parse_float_or_none(self._zmax_input.text())
+            }
+        else:
+            self._clip_bounds = {}
+    
+    def _toggle_clipping(self):
+        """Toggle visibility of clipping controls"""
+        is_enabled = self._clipping_checkbox.isChecked()
+        self._clipping_frame.setVisible(is_enabled)
+        self._enable_clipping = is_enabled
+        self._update_clipping_toggle(is_enabled)
+
 
 
 class MoleculeConfigDialog(QDialog):
@@ -910,8 +1273,8 @@ class MoleculeConfigDialog(QDialog):
         self._okexit = True
 
 
-class StreamLineSetupDialog(QDialog):
-    """Dialog for setting up stream lines
+class StreamLineSetupDialog(QDialog, _ClipPlaneMixin):
+    """Dialog for setting up stream lines with spatial clipping options
 
     Args:
         QDialog (_type_): _description_
@@ -932,6 +1295,11 @@ class StreamLineSetupDialog(QDialog):
                  particle_type: str = "sphere",
                  sampling_method: str = "ellipsoid",
                  scalevdw: float = 1.0,
+                 enable_clipping: bool = False,
+                 clip_bounds: tp.Optional[tp.Dict[str, tp.Optional[float]]] = None,
+                 vtk_renderer=None,
+                 vtk_render_window=None,
+                 vtk_scene_bounds: tp.Optional[tp.Tuple[float, ...]] = None,
                  parent: tp.Optional[tp.Union[QDialog, None]] = None,
                  ) -> None:
         """ initialize the dialog. Requires a dictionary with the parameters,
@@ -940,6 +1308,8 @@ class StreamLineSetupDialog(QDialog):
         Args:
             params (tp.Dict[str, tp.Any]): dictionary with the parameters
             maxval (float): maximum norm value in the field
+            enable_clipping (bool): whether spatial clipping is enabled
+            clip_bounds (tp.Optional[tp.Dict[str, tp.Optional[float]]]): clipping bounds
             parent (tp.Optional[tp.Union[QDialog, None]]): Not required
         """
         super().__init__(parent)
@@ -956,6 +1326,9 @@ class StreamLineSetupDialog(QDialog):
         self._particle_type = particle_type
         self._sampling_method = sampling_method
         self._scalevdw = scalevdw
+        self._enable_clipping = enable_clipping
+        self._clip_bounds = clip_bounds or {}
+        self._init_clip_planes(vtk_renderer, vtk_render_window, vtk_scene_bounds)
         self._recalseeds = False
         self._redrawstream = False
         # print(f"vfmax:{self._vfmax} vfmin:{self._vfmin} mspeed:{self._mspeed} nseeds:{self._nseeds} scale:{self._scale}")
@@ -1012,7 +1385,75 @@ class StreamLineSetupDialog(QDialog):
         seedvalid.setRange(1, 500)
         self._seedline = EditIntLine("Number of seeds", nseeds, seedvalid)
         grid.addItem(self._seedline._hlay, 2, 1)
-        # Ellipsoid scaling factor
+        # Spatial clipping section
+        self._clipping_checkbox = QCheckBox("Enable Spatial Clipping")
+        self._clipping_checkbox.setChecked(enable_clipping)
+        self._clipping_checkbox.stateChanged.connect(self._toggle_clipping)
+        grid.addWidget(self._clipping_checkbox, 7, 0, 1, 2)
+        
+        # Create clipping controls group (initially hidden)
+        self._clipping_frame = QFrame()
+        self._clipping_frame.setFrameStyle(QFrame.StyledPanel)
+        clipping_layout = QGridLayout(self._clipping_frame)
+        
+        # X bounds
+        x_label = QLabel("X Range (Bohr):")
+        clipping_layout.addWidget(x_label, 0, 0)
+        
+        self._xmin_input = QLineEdit()
+        self._xmin_input.setPlaceholderText("xmin (leave empty for no limit)")
+        self._xmin_input.setText(str(self._clip_bounds.get('xmin', '')) if self._clip_bounds.get('xmin') is not None else '')
+        clipping_layout.addWidget(self._xmin_input, 0, 1)
+        
+        self._xmax_input = QLineEdit()
+        self._xmax_input.setPlaceholderText("xmax (leave empty for no limit)")
+        self._xmax_input.setText(str(self._clip_bounds.get('xmax', '')) if self._clip_bounds.get('xmax') is not None else '')
+        clipping_layout.addWidget(self._xmax_input, 0, 2)
+        
+        # Y bounds
+        y_label = QLabel("Y Range (Bohr):")
+        clipping_layout.addWidget(y_label, 1, 0)
+        
+        self._ymin_input = QLineEdit()
+        self._ymin_input.setPlaceholderText("ymin (leave empty for no limit)")
+        self._ymin_input.setText(str(self._clip_bounds.get('ymin', '')) if self._clip_bounds.get('ymin') is not None else '')
+        clipping_layout.addWidget(self._ymin_input, 1, 1)
+        
+        self._ymax_input = QLineEdit()
+        self._ymax_input.setPlaceholderText("ymax (leave empty for no limit)")
+        self._ymax_input.setText(str(self._clip_bounds.get('ymax', '')) if self._clip_bounds.get('ymax') is not None else '')
+        clipping_layout.addWidget(self._ymax_input, 1, 2)
+        
+        # Z bounds
+        z_label = QLabel("Z Range (Bohr):")
+        clipping_layout.addWidget(z_label, 2, 0)
+        
+        self._zmin_input = QLineEdit()
+        self._zmin_input.setPlaceholderText("zmin (leave empty for no limit)")
+        self._zmin_input.setText(str(self._clip_bounds.get('zmin', '')) if self._clip_bounds.get('zmin') is not None else '')
+        clipping_layout.addWidget(self._zmin_input, 2, 1)
+        
+        self._zmax_input = QLineEdit()
+        self._zmax_input.setPlaceholderText("zmax (leave empty for no limit)")
+        self._zmax_input.setText(str(self._clip_bounds.get('zmax', '')) if self._clip_bounds.get('zmax') is not None else '')
+        clipping_layout.addWidget(self._zmax_input, 2, 2)
+        
+        # Add double validators for coordinate inputs
+        coord_validator = QDoubleValidator()
+        coord_validator.setLocale(QLocale('English'))
+        for input_field in [self._xmin_input, self._xmax_input, self._ymin_input, 
+                           self._ymax_input, self._zmin_input, self._zmax_input]:
+            input_field.setValidator(coord_validator)
+        
+        # Add clipping frame to main layout
+        self.vlay.addWidget(self._clipping_frame)
+        
+        # Set initial visibility
+        self._clipping_frame.setVisible(enable_clipping)
+        
+        # Clip-plane preview checkbox (enabled only when clipping and VTK are available)
+        self.vlay.addWidget(self._setup_plane_preview_ui(enable_clipping))
+
         scaleval = QDoubleValidator()
         scaleval.setLocale(QLocale('English'))
         scaleval.setRange(.2, 10.)
@@ -1045,8 +1486,8 @@ class StreamLineSetupDialog(QDialog):
         scalevdwval = QDoubleValidator()
         scalevdwval.setLocale(QLocale('English'))
         scalevdwval.setRange(.2, 5.)
-        self._scalevdw = EditDoubleLine("VDW radius scaling", scalevdw, scalevdwval)
-        grid.addItem(self._scalevdw._hlay, 6, 1)
+        self._scalevdw_edit = EditDoubleLine("VDW radius scaling", scalevdw, scalevdwval)
+        grid.addItem(self._scalevdw_edit._hlay, 6, 1)
         particlevalid = QIntValidator()
         particlevalid.setLocale(QLocale('English'))
         particlevalid.setRange(1, 50)  # Reasonable range for particles
@@ -1091,7 +1532,7 @@ class StreamLineSetupDialog(QDialog):
         """Update UI controls based on selected sampling method"""
         ellipsoid_selected = self._ellipsoid_radio.isChecked()
         self._scalemol._line.setEnabled(ellipsoid_selected)
-        self._scalevdw._line.setEnabled(not ellipsoid_selected)
+        self._scalevdw_edit._line.setEnabled(not ellipsoid_selected)
         
         # Update sampling method
         self._sampling_method = "ellipsoid" if ellipsoid_selected else "molvolume"
@@ -1120,8 +1561,8 @@ class StreamLineSetupDialog(QDialog):
         if self._scalemol.edit:
             self._recalseeds = True
             self._redrawstream = True
-        scalevdw_value = self._scalevdw._getvalue()
-        if self._scalevdw.edit:
+        scalevdw_value = self._scalevdw_edit._getvalue()
+        if self._scalevdw_edit.edit:
             self._recalseeds = True
             self._redrawstream = True
         self._scalevdw = scalevdw_value
@@ -1130,6 +1571,27 @@ class StreamLineSetupDialog(QDialog):
             self._redrawstream = True
         self._particle_type = self._particle_type_combo.currentText()
         self._sampling_method = "ellipsoid" if self._ellipsoid_radio.isChecked() else "molvolume"
+        
+        # Handle spatial clipping bounds
+        self._enable_clipping = self._clipping_checkbox.isChecked()
+        if self._enable_clipping:
+            # Parse coordinate inputs, handling empty strings as None
+            def parse_float_or_none(text):
+                try:
+                    return float(text) if text.strip() else None
+                except (ValueError, AttributeError):
+                    return None
+            
+            self._clip_bounds = {
+                'xmin': parse_float_or_none(self._xmin_input.text()),
+                'xmax': parse_float_or_none(self._xmax_input.text()),
+                'ymin': parse_float_or_none(self._ymin_input.text()),
+                'ymax': parse_float_or_none(self._ymax_input.text()),
+                'zmin': parse_float_or_none(self._zmin_input.text()),
+                'zmax': parse_float_or_none(self._zmax_input.text())
+            }
+        else:
+            self._clip_bounds = {}
         # print(f"vfmax:{self._vfmax} vfmin:{self._vfmin} mspeed:{self._mspeed} nseeds:{self._nseeds} scale:{self._scale}")
 
     def _setresample(self):
@@ -1154,4 +1616,11 @@ class StreamLineSetupDialog(QDialog):
         self._particleline._line.setEnabled(self._animate_particles)
         # Enable/disable particle type combo box based on animation checkbox
         self._particle_type_combo.setEnabled(self._animate_particles)
+    
+    def _toggle_clipping(self):
+        """Toggle visibility of clipping controls"""
+        is_enabled = self._clipping_checkbox.isChecked()
+        self._clipping_frame.setVisible(is_enabled)
+        self._enable_clipping = is_enabled
+        self._update_clipping_toggle(is_enabled)
 
