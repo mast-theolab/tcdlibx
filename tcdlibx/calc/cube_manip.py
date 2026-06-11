@@ -10,7 +10,6 @@ import numpy as np
 # custom libraries
 from tcdlibx.utils.custom_except import NoValidData
 from tcdlibx.utils.var_tools import angle_between, Poliedron, trilinerarinterpolation
-import tcdlibx.utils.types as mytp
 GPU = importlib.util.find_spec('numba')
 if GPU:
     from tcdlibx.calc.numba_linalg_3 import cross3
@@ -126,14 +125,14 @@ class CubeData:
         self.cube = copy.deepcopy(origin.cube)
         self.box = copy.deepcopy(origin.box)
 
-    def set_origin(self, origin: mytp.Array3F) -> None:
+    def set_origin(self, origin: np.ndarray) -> None:
         """
         Set the origin of the cube
         """
         self.loc2wrd[:3, 3] = np.array(origin)
         self.wrd2loc = np.linalg.inv(self.loc2wrd)
 
-    def get_origin(self) -> mytp.Array3F:
+    def get_origin(self) -> np.ndarray:
         """
         Get the origin of the cube in world space
         """
@@ -159,7 +158,7 @@ class CubeData:
     #         axis = 2
     #     self.loc2wrd[:3, axis] = ithvec
 
-    def get_axstep(self, axis: int | str) -> mytp.Array3F:
+    def get_axstep(self, axis: int | str) -> np.ndarray:
         """
         return the step along the specified axis
         """
@@ -185,10 +184,10 @@ class CubeData:
         vec = self.get_axstep(axis)
         return np.sqrt(np.dot(vec, vec))
 
-    def set_loc2wrd(self, x_th: mytp.Array3F,
-                    y_th: mytp.Array3F,
-                    z_th: mytp.Array3F,
-                    ori: mytp.Array3F) -> None:
+    def set_loc2wrd(self, x_th: np.ndarray,
+                    y_th: np.ndarray,
+                    z_th: np.ndarray,
+                    ori: np.ndarray) -> None:
         """
         Set the local2word 4x4 matrix from np.vector
         x axis, y axis, z axis, origin
@@ -199,7 +198,7 @@ class CubeData:
         self.loc2wrd[:3, 3] = ori
         self.wrd2loc = np.linalg.inv(self.loc2wrd)
 
-    def _wrdtolocal(self, point: mytp.Array3F) -> mytp.Array3F:
+    def _wrdtolocal(self, point: np.ndarray) -> np.ndarray:
         """
         converts a point from world to local frame
         """

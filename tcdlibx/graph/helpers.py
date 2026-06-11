@@ -31,7 +31,7 @@ def filtervecatom(cubefile: CubeData, thresh: float = 0.1) -> list[int]:
         thresh (float, optional): _description_. Defaults to 0.15.
     """
     res = []
-    radii = [atomic_data(int(x))[int(x)]['rvdw']/PHYSFACT.bohr2ang*thresh for x in cubefile.ian]
+    radii = [atomic_data(int(x))[int(x)]['rvdw']['alvarez13']/PHYSFACT.bohr2ang*thresh for x in cubefile.ian]
     for i in range(cubefile.crd.shape[0]):
         tmp_index = cubefile.indexinsphere(cubefile.crd[i], radii[i]).tolist()
         if tmp_index:
@@ -51,7 +51,7 @@ def molecular_voxels(cubefile: CubeData, maxthresh: float = 1.5, minthresh: floa
         list[int]: _description_
     """
     res = []
-    radii = [atomic_data(int(x))[int(x)]['rvdw']/PHYSFACT.bohr2ang for x in cubefile.ian]
+    radii = [atomic_data(int(x))[int(x)]['rvdw']['alvarez13']/PHYSFACT.bohr2ang for x in cubefile.ian]
     for i in range(cubefile.crd.shape[0]):
         tmp_index_all = cubefile.indexinsphere(cubefile.crd[i], radii[i]*maxthresh).tolist()
         tmp_index_inner = cubefile.indexinsphere(cubefile.crd[i],
@@ -78,9 +78,9 @@ def vdw_boolean_mask(cubefile: CubeData, thresh: float = 1.0) -> np.ndarray:
         cubefile.make_box()
     ntotal = cubefile.npts[0] * cubefile.npts[1] * cubefile.npts[2]
     mask = np.zeros(ntotal, dtype=bool)
-    radii = [atomic_data(int(x))[int(x)]['rvdw'] / PHYSFACT.bohr2ang * thresh
+    radii = [atomic_data(int(x))[int(x)]['rvdw']['alvarez13'] / PHYSFACT.bohr2ang * thresh
              for x in cubefile.ian]
-    print(radii)
+    # print(radii)
     for i in range(cubefile.crd.shape[0]):
         indices = cubefile.indexinsphere(cubefile.crd[i], radii[i])
         if indices.size:

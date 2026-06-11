@@ -140,6 +140,8 @@ class TCDvis(QMainWindow):
         exportPOVButton.setStatusTip('Export the current scene to a POV-Ray file')
         exportPOVButton.triggered.connect(self.export_scene_pov)
         fileMenu.addAction(exportPOVButton)
+        # For Now disable export POV-Ray until we have a better implementation
+        exportPOVButton.setEnabled(False)
 
         ## Exit
         exitButton = QAction(QIcon('exit24.png'), 'Exit', self)
@@ -1544,7 +1546,7 @@ class TCDvis(QMainWindow):
         if saim_checked:
             ind = self._fchk.avail_tcd()[0]
             tmp_cube = self._fchk.get_tcd(ind).get_frag_isosurf()
-            _mask = vdw_boolean_mask(tmp_cube, thresh=2)
+            _mask = vdw_boolean_mask(tmp_cube, thresh=1)
             tmp_cube.loc2wrd *=  PHYSFACT.bohr2ang
             tmp_cube.cube = np.where(_mask, tmp_cube.cube, -1e10)  # Mask out values outside the vdW surface
             colors = self._fchk.get_frag_colors()

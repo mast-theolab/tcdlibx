@@ -13,7 +13,7 @@ name = "tcdlibx"
 version = "0.1.0"
 requires-python = ">= 3.10"
 dependencies = ['numpy',
-#    'estampes @ git+https://github.com/mast-theolab/estampes.git',
+    'estampes @ git+https://github.com/mast-theolab/estampes.git',
     'matplotlib']
 authors = [
     {name = "Marco Fusè", email = "marcofuse@pm.me"}
@@ -31,7 +31,7 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-gui = ['PySide6', 'vtk', 'estampes']
+gui = ['PySide6', 'vtk']
 
 
 [project.scripts]

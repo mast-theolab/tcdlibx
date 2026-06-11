@@ -1,8 +1,7 @@
 import numpy as np
-import typing as tp
 
-def centre_of_mass(crd: np.ndarray, 
-    atmass: tp.Union[np.ndarray, tp.List[float]]) -> np.ndarray:
+def centre_of_mass(crd: np.ndarray,
+    atmass: np.ndarray | list[float]) -> np.ndarray:
     """
     Returns the centre of mass of the coordinates
     
@@ -20,8 +19,8 @@ def centre_of_mass(crd: np.ndarray,
     # center of mass
     return np.average(crd, axis=0, weights=atmass)
 
-def inertiatens(crd: np.ndarray, 
-    atmass: tp.Union[np.ndarray, tp.List[float]]) -> np.ndarray:
+def inertiatens(crd: np.ndarray,
+    atmass: np.ndarray | list[float]) -> np.ndarray:
     """
     Computes and returns the inertia tensor.
 
@@ -50,8 +49,8 @@ def inertiatens(crd: np.ndarray,
     ine_tensor[1, 2] = ine_tensor[2, 1] = (-atmass * (crd[:, 1] * crd[:, 2])).sum()
     return ine_tensor
 
-def inertia(crd: np.ndarray, 
-    atmass: tp.Union[np.ndarray, tp.List[float]]) -> np.ndarray:
+def inertia(crd: np.ndarray,
+    atmass: np.ndarray | list[float]) -> np.ndarray:
     """
     Computes and returns the inertia axis and the rotation values
 
@@ -72,8 +71,8 @@ def inertia(crd: np.ndarray,
     eigval, eigvec = np.linalg.eigh(ine_tensor)
     return (eigval, eigvec)
 
-def rotmat_principal(crd: np.ndarray, 
-    atmass: tp.Union[np.ndarray, tp.List[float]]) -> np.ndarray:
+def rotmat_principal(crd: np.ndarray,
+    atmass: np.ndarray | list[float]) -> np.ndarray:
     """
     Computes and returns the rotation matrix to the principal axis orientation.
 
@@ -106,8 +105,8 @@ def rotmat_principal(crd: np.ndarray,
         rotmat[:, 0] *= -1
     return rotmat
 
-def eckart_orientation(crd: np.ndarray, 
-    atmass: tp.Union[np.ndarray, tp.List[float]]) -> np.ndarray:
+def eckart_orientation(crd: np.ndarray,
+    atmass: np.ndarray | list[float]) -> np.ndarray:
     """
     Returns the coordinates in Eckart orientation
     
@@ -142,7 +141,7 @@ def eckart_orientation(crd: np.ndarray,
 
 def traslroto(
     crd: np.ndarray,
-    atmass: tp.Union[np.ndarray, tp.List[float]]
+    atmass: np.ndarray | list[float]
 ) -> np.ndarray:
     """
     Computes and returns the translation and rotation vectors (translational and rotational modes)
@@ -203,88 +202,6 @@ def traslroto(
 
     return lvec_trarot.reshape(-1, 3 * natoms)
 
-def vibrational(cartfc: np.ndarray, crd: np.ndarray,
-                atmass: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Compute vibrational frequencies, normal modes, and reduced masses for a molecular system.
-
-    Parameters
-    ----------
-    cartfc : np.ndarray
-        Cartesian force constant (Hessian) matrix, shape (N, 3, N, 3) or (N*3, N*3),
-        where N is the number of atoms.
-    crd : np.ndarray
-        Cartesian coordinates of the atoms, shape (N, 3).
-    atmass : np.ndarray
-        Atomic masses, shape (N,).
-
-    Returns
-    -------
-    freq : np.ndarray
-        Vibrational frequencies (in atomic units), shape (3*N - ntrrot,).
-    lvec : np.ndarray
-        Normal mode eigenvectors (mass-weighted), shape (3*N, 3*N - ntrrot).
-    rmas : np.ndarray
-        Reduced masses for each vibrational mode, shape (3*N - ntrrot,).
-
-    Raises
-    ------
-    Exception
-        If a null vector is encountered during orthogonalization.
-
-    Notes
-    -----
-    The function projects out translational and rotational modes, performs mass-weighting,
-    and returns vibrational properties suitable for further spectroscopic analysis.
-    """
-    cartfc = np.asarray(cartfc)
-    crd = np.asarray(crd)
-    atmass = np.asarray(atmass)
-    if cartfc.ndim == 4:
-        cartfc = cartfc.reshape((3*crd.shape[0], 3*crd.shape[0]))
-    if cartfc.shape[0] != 3 * crd.shape[0] or cartfc.shape[1] != 3 * crd.shape[0]:
-        raise ValueError("cartfc must be a square matrix of shape (3*N, 3*N) where N is the number of atoms")
-    if crd.ndim != 2 or crd.shape[1] != 3:
-        raise ValueError("crd must be a 2D numpy array with shape (N, 3)")
-    if atmass.ndim != 1 or atmass.shape[0] != crd.shape[0]:
-        raise ValueError("atmass must be a 1D array or list of length N (number of atoms)")
-    natoms = crd.shape[0]
-    mwvec = np.ones_like(crd) / np.sqrt(atmass)[:, np.newaxis]
-    mwvec = mwvec.reshape(-1)
-    mwmat = np.outer(mwvec, mwvec)
-    # mass weighted hessian
-    mwhes = cartfc.reshape((3*natoms, 3*natoms)) * mwmat
-    _, tmpd = np.linalg.eigh(mwhes)
-    lvec_trarot = traslroto(crd, atmass)
-    ntrrot = lvec_trarot.shape[0]
-    dfinal = np.zeros((3*natoms, 3*natoms))
-    dfinal[:, :ntrrot] = lvec_trarot.T
-    # check high contr to transl-rot
-    contr = (np.dot(tmpd.T, lvec_trarot.T)**2).sum(axis=1)
-    #print(contr)
-    # Controllare forse non necessario
-    minnot = np.sort(contr)[-ntrrot]
-    dfinal[:, ntrrot:] = tmpd[:, contr < minnot]
-    # Gram-Schmidt orthogonalization TODO check for null vector
-    dorth, _ = np.linalg.qr(dfinal)
-    # Normalization
-    for i in range(dorth.shape[1]):
-        i_norm = np.sqrt(np.dot(dorth[:, i], dorth[:, i]))
-        if i_norm > 1e-6:
-            dorth[:, i] /= i_norm
-        else:
-            raise Exception('Null Vector')
-    # f_int = D.T F_mw D
-    fint = np.dot(np.dot(dorth.T, mwhes), dorth)
-    freq, evec = np.linalg.eigh(fint[ntrrot:, ntrrot:])
-    lvec = np.dot(dorth[:, ntrrot:], evec)
-    # lvec = MDL
-    mwdig = np.identity(natoms*3)*(1/np.sqrt(atmass)[:,np.newaxis]*np.ones_like(crd)).reshape(-1)
-    lvec = np.dot(mwdig, np.dot(dorth[:, ntrrot:], evec))
-    rmas = 1/(lvec**2).sum(axis=0)
-    # Gaussian store in fchk lvec * np.sqrt(rmas)
-    # Freq au2cm-1 -> 219474.631371/np.sqrt(1822.88848)
-    return (freq, lvec, rmas)
 
 def quaternion_rotationmatrix(crd_one, crd_two, weight):
     """[summary]
@@ -345,7 +262,7 @@ def quaternion_rotationmatrix(crd_one, crd_two, weight):
 
 def getrotmat(refgeom: np.ndarray,
               newgeom: np.ndarray,
-              weights: tp.Optional[np.ndarray] = None) -> np.ndarray:
+              weights: np.ndarray | None = None) -> np.ndarray:
     """Superimpose the newgeom structure to a reference one (refgeom) using quaternion algorithm.
     Accepts np.ndarray where N is the number of atoms
                 
@@ -354,7 +271,7 @@ def getrotmat(refgeom: np.ndarray,
         newgeom {np.ndarray(N, 3)} -- Structure to be superimposed 
     
     Keyword Arguments:
-        weights {Optional[np.ndarray(N)]} -- coordinate weight, usually the mass (default: {None})
+        weights {np.ndarray(N) | None} -- coordinate weight, usually the mass (default: {None})
     
     Returns:
         np.ndarray(3, 3) -- Rotation Matrix 
@@ -418,7 +335,7 @@ def quaternion_v3(crd_one, crd_two, weights):
 
 def superimpose(refgeom: np.ndarray,
                 newgeom: np.ndarray,
-                weights: tp.Optional[np.ndarray] = None) -> np.ndarray:
+                weights: np.ndarray | None = None) -> np.ndarray:
     """Superimpose the newgeom structure to a reference one (refgeom) using quaternion algorithm.
     Accepts np.ndarray where N is the number of atoms
                 
@@ -427,7 +344,7 @@ def superimpose(refgeom: np.ndarray,
         newgeom {np.ndarray(N, 3)} -- Structure to be superimposed 
     
     Keyword Arguments:
-        weights {Optional[np.ndarray(N)]} -- coordinate weight, usually the mass (default: {None})
+        weights {np.ndarray(N) | None} -- coordinate weight, usually the mass (default: {None})
     
     Returns:
         np.ndarray(N, 3) -- The transformed structure 
@@ -445,7 +362,7 @@ def superimpose(refgeom: np.ndarray,
 
 def superimpose_rotmat(refgeom: np.ndarray,
                 newgeom: np.ndarray,
-                weights: tp.Optional[np.ndarray] = None) -> np.ndarray:
+                weights: np.ndarray | None = None) -> np.ndarray:
     """Superimpose the newgeom structure to a reference one (refgeom) using quaternion algorithm.
     Accepts np.ndarray where N is the number of atoms
                 
@@ -454,7 +371,7 @@ def superimpose_rotmat(refgeom: np.ndarray,
         newgeom {np.ndarray(N, 3)} -- Structure to be superimposed 
     
     Keyword Arguments:
-        weights {Optional[np.ndarray(N)]} -- coordinate weight, usually the mass (default: {None})
+        weights {np.ndarray(N) | None} -- coordinate weight, usually the mass (default: {None})
     
     Returns:
         np.ndarray(N, 3) -- The transformed structure 

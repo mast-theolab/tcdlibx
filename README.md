@@ -12,7 +12,7 @@ datasets arising from quantum-chemical calculations, with a focus on
 - Interactive 3-D visualization via a PySide6/VTK GUI (`tcdvis`):
   - Isosurfaces, streamlines, quiver plots and particle animations
   - Molecular geometry overlay
-  - Export scenes to PNG and POV-Ray (`.pov`)
+  - Export scenes to PNG
 - 2-D quiver-plot scripts for quick inspection
 
 ## Dependencies
@@ -20,7 +20,7 @@ datasets arising from quantum-chemical calculations, with a focus on
 ### Required
 - [`numpy`](https://numpy.org)
 - [`matplotlib`](https://matplotlib.org)
-- [`estampes`](https://github.com/mast-theolab/estampes) *(install separately, see below)*
+- [`estampes`](https://github.com/mast-theolab/estampes)
 
 ### Optional
 - `vtk` — required for the GUI and 3-D visualization
@@ -29,17 +29,8 @@ datasets arising from quantum-chemical calculations, with a focus on
 
 ## Installation
 
-First install `estampes` from its repository:
-
-```bash
-pip install git+https://github.com/mast-theolab/estampes.git
-```
-
-Then install `tcdlibx`:
-
 ```bash
 pip install . -e
-
 ```
 
 `numba` can be added independently:
@@ -64,7 +55,7 @@ pip install numba
 tcdvis
 ```
 
-Once open, use **File → Open** to load a `.fchk` file and then load the
+Once open, use **File -> Open** to load a `.fchk` file and then load the
 corresponding TCD `.cube` file(s) through the interface.
 
 
