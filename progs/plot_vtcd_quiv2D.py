@@ -303,6 +303,8 @@ Coordinates (in Bohr)
 
         fig0, ax0 = plt.subplots()
         _, x_ax, y_ax = cbplt.check_ax(OPTS.axis)
+
+        ax0.axis('equal')
         if OPTS.printTitle:
             ax0.set_title('{}'.format(OPTS.printTitle))
         if OPTS.setlimit:

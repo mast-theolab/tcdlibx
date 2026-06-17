@@ -672,6 +672,60 @@ class NMConfigDialog(QDialog):
         self._okexit = True
 
 
+class CubeDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.setWindowTitle("Cube Loader")
+
+        # widget =  QWidget(self)
+        # self.setCentralWidget(widget)
+        self.vlay = QVBoxLayout()
+        grid = QGridLayout()
+        self.vlay.addLayout(grid)
+        self._fname = ""
+        self._label = ""
+        self._val = None
+        self._cube = None
+        self._cubefname = "No file"
+
+        message = QLabel("Cube label:")
+        self.nmline = QLineEdit()
+        self.nmline.setText("Cube1")
+        self.nmline.editingFinished.connect(self._setval)
+
+        openbutton = QPushButton('OpenCube', self)
+        openbutton.clicked.connect(self.open)
+ 
+        self.editline = QLineEdit()
+        self.editline.setText("{}".format(self._cubefname))
+        self.editline.setEnabled(False)
+        # grid.addWidget(message)
+        grid.addWidget(message, 0, 0)
+        grid.addWidget(self.nmline, 0, 1)
+        grid.addWidget(openbutton, 0, 2)
+        grid.addWidget(self.editline, 0, 3)
+        
+        QBtn = QDialogButtonBox.Ok | QDialogButtonBox.Cancel 
+
+        self.buttonBox = QDialogButtonBox(QBtn)
+        self.buttonBox.accepted.connect(self.accept)
+        self.accepted.connect(self._setval)
+        self.buttonBox.rejected.connect(self.reject)
+
+        # self.vlay.addWidget(message)
+        self.vlay.addWidget(self.buttonBox)
+        self.setLayout(self.vlay)
+
+    def open(self):
+        self._cube = QFileDialog.getOpenFileName(self, 'Select cube file', '.','*.cube')[0]
+        self._cubefname = os.path.basename(self._cube)
+        self.editline.setText("{}".format(self._cubefname))
+ 
+    def _setval(self):
+        self._label = str(self.nmline.text())
+
+
 class TCDDialog(QDialog):
     def __init__(self, parent=None, maxval=1, texts: tp.List[str] = ["VTCD", "NM"]):
         super().__init__(parent)

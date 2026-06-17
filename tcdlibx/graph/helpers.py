@@ -222,7 +222,120 @@ class Molecule():
                                           np.array(self._moldata['atnum'])[mask],
                                           npts, scale)
         return self._samplepoints
-            
+
+
+class VolumeMolecule(Molecule):
+    """ Class to store data related to volume transitions
+    """
+    def __init__(self, data):
+        Molecule.__init__(self, data)
+        self._voldata = {}
+        self._aimdata = None
+        self._nvol = 0
+        self._voltype = {}
+
+    @property
+    def nvol(self) -> int:
+        return self._nvol
+
+    def add_vol(self, label: str, cubedata: CubeData):
+        if cubedata.natoms != self.natoms:
+            raise NoValidData("Molecule.add_vol", "Different molecular systems")
+        tmp_data = cubedata
+        if self._aimdata is not None:
+            tmp_data = AimCubeData(cubedata, self._aimdata)
+            if self._frags is not None:
+               tmp_data.set_fragments(self._frags['indx'])
+        self._voldata[label] = tmp_data
+        self._nvol += 1
+        self._voltype[label] = tmp_data.nval
+
+    def get_voltype(self, label: str) -> int:
+        return self._voltype[label]
+
+    def avail_vol(self) -> list[str]:
+        return list(self._voldata.keys())
+
+    def get_vol(self, label: str) -> CubeData:
+        return self._voldata[label]
+
+    def remove_vol(self, label: str) -> bool:
+        """
+        Remove a specific volume cube from memory to free resources.
+        
+        Args:
+            label (str): Label of the volume cube to remove
+        """
+        if label in self._voldata:
+            del self._voldata[label]
+            del self._voltype[label]
+            self._nvol -= 1
+            return True
+        return False
+
+    def remove_all_vol(self) -> int:
+        """
+        Remove all stored volume cubes from memory to free resources.
+        
+        Returns:
+            int: Number of cubes removed
+        """
+        count = len(self._voldata)
+        self._voldata.clear()
+        self._voltype.clear()
+        self._nvol = 0
+        return count
+
+    def add_aim(self, aimcube: CubeData):
+        # FIXME aim must be added after, and all data are expected to have the same cube
+        if not self._voldata:
+            raise NoValidData("add_aim", "Add a volume data first")
+        elif not self._voldata[self.avail_vol()[0]].same_system(aimcube):
+            raise NoValidData("AimCube", "must share system with volume data")
+        # FIXME redundant
+        self._aimdata = aimcube
+        for vol in self.avail_vol():
+            self._voldata[vol] = AimCubeData(self._voldata[vol], self._aimdata)
+            if self._frags is not None:
+                self._voldata[vol].set_fragments(self._frags['indx'])
+
+    def get_vol_integral(self, label: str) -> float | np.ndarray:
+        if label not in self._voldata:
+            raise NoValidData("Molecule.get_vol_integral", "Volume data not available")
+        return self._voldata[label].integrate()
+
+    def get_vol_rotor_integral(self, label: str) -> np.ndarray:
+        if label not in self._voldata:
+            raise NoValidData("Molecule.get_vol_rotor_integral", "Volume data not available")
+        if self._voldata[label].nval == 3:
+            return self._voldata[label].rotorintegrate()
+        else:
+            raise NoValidData("Molecule.get_vol_rotor_integral", "Volume data is not a vector field")
+
+    def get_vol_integrals(self, label: str, tps: str = 'tot') -> tuple[float | np.ndarray, np.ndarray]:
+        if label not in self._voldata:
+            raise NoValidData("Molecule.get_vol_integrals", "Volume data not available")
+        if tps == 'tot':
+            integral = self._voldata[label].integrate()
+            rotor_integral = None
+            if self._voldata[label].nval == 3:
+                rotor_integral = self._voldata[label].rotorintegrate()
+        elif tps == 'frags':
+            if self._frags is None or self._aimdata is None:
+                raise NoValidData("Molecule.get_vol_integrals", "Fragments or AIM data not available")
+            tmp_res = self._voldata[label].get_frags_contribution()
+            integral = np.array(tmp_res['int'])
+            rotor_integral = np.array(tmp_res['rot'])
+        return integral, rotor_integral
+
+
+def fill_molecule_from_cubedata(cubefile: CubeData) -> VolumeMolecule:
+    res = {}
+    res['atnum'] = cubefile.ian.astype(int)
+    res['atcrd'] = cubefile.crd*PHYSFACT.bohr2ang
+    res['atmas'] = np.array([atomic_data(int(x))[int(x)]['mass'] for x in cubefile.ian])
+    return VolumeMolecule(res)
+
 
 class VibMolecule(Molecule):
     """ Class to stare data related to vibrational transitions
