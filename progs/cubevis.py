@@ -6,14 +6,13 @@
 import copy
 import os
 import sys
-import typing as tp
 
 # Third-party imports
 import numpy as np
 
 # PySide6/Qt imports
 from PySide6.QtCore import QLocale, QRect, QTimer
-from PySide6.QtGui import QAction, QDoubleValidator, QIcon, QIntValidator
+from PySide6.QtGui import QAction, QDoubleValidator, QIcon
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout,
     QLabel, QLineEdit, QMainWindow, QPushButton, QSizePolicy, QSpacerItem,
@@ -25,7 +24,7 @@ from tcdlibx.calc.cube_manip import VecCubeData, ScalarsCube, cube_parser
 from tcdlibx.graph.helpers import VolumeMolecule, filtervecatom, sample_molecular_volume, DEFAULT_PARAMETERS, write_molecule_pov, vdw_boolean_mask, fill_molecule_from_cubedata
 import tcdlibx.graph.cube_graphvtk as cubetk
 from tcdlibx.gui.dialogs import (
-    SavePngDialog, SavePngSeriesDialog, StreamLineSetupDialog, CubeDialog, QuiverSetupDialog, SaveSceneDialog, ExportPOVDialog, NMConfigDialog, MoleculeConfigDialog
+    SavePngDialog, SavePngSeriesDialog, StreamLineSetupDialog, QuiverSetupDialog, SaveSceneDialog, ExportPOVDialog, MoleculeConfigDialog
 )
 from tcdlibx.io.estp_io import PHYSFACT
 from tcdlibx.io.jsonio import read_json, write_json
