@@ -471,18 +471,7 @@ class TCDvis(QMainWindow):
 
     def _reset_interface_state(self):
         """Reset interface state when switching between molecule types"""
-        # Reset normal mode checkboxes (only relevant for vibrational molecules)
-        if 'mol' in self._menus and 'nm' in self._menus['mol']:
-            if 'disp' in self._menus['mol']['nm']:
-                self._menus['mol']['nm']['disp'].setChecked(False)
-        
-        # Reset normal mode configuration to defaults
-        self._default['nmconfig'] = {
-            'invert_phase': False,
-            'scale_factor': 1.0,
-            'color': (0.0, 0.0, 1.0)
-        }
-        
+       
         # Reset transparency checkbox
         if 'mol' in self._menus and 'transparent' in self._menus['mol']:
             self._menus['mol']['transparent'].setChecked(False)
@@ -505,47 +494,21 @@ class TCDvis(QMainWindow):
         # Reset property combo box to first item
         if hasattr(self, 'prop'):
             self.prop.clear()
-            self.prop.addItem('')
+            self.prop.addItem('          ')
             self.prop.setCurrentIndex(0)
         
         # Disable TCD-related menu items
         if hasattr(self, '_menus'):
-            if 'etcd' in self._menus and 'dmt' in self._menus['etcd']:
-                self._menus['etcd']['dmt'].setEnabled(False)
-            if 'vtcd' in self._menus and 'dmt' in self._menus['vtcd']:
-                self._menus['vtcd']['dmt'].setEnabled(False)
+            if 'cubes' in self._menus and 'dmt' in self._menus['cubes']:
+                print("Disabling Cube DTM menu")
+                self._menus['cubes']['dmt'].setEnabled(False)
             if 'etcddtm' in self._menus and 'frags' in self._menus['etcddtm']:
                 self._menus['etcddtm']['frags'].setEnabled(False)
-            if 'vtcddtm' in self._menus and 'frags' in self._menus['vtcddtm']:
-                self._menus['vtcddtm']['frags'].setEnabled(False)
+
         
         # Reset DTM-related elements
-        self._reset_dtm_interface()
+      
 
-    def _reset_dtm_interface(self):
-        """Reset DTM-related interface elements to their default state"""
-        # Clear any existing DTM visualizations
-        if hasattr(self, '_actors') and 'mfpdtm' in self._actors:
-            self.ren.RemoveActor(self._actors['mfpdtm'].actor)
-            self._actors.pop('mfpdtm')
-        
-        # Disable and uncheck DTM menu items
-        if hasattr(self, '_menus'):
-            # Reset electronic DTM menus
-            if 'mol' in self._menus and 'edmt' in self._menus['mol']:
-                self._menus['mol']['edmt'].setEnabled(False)
-            if 'eledmt' in self._menus:
-                for key in self._menus['eledmt']:
-                    if key != 'menu' and hasattr(self._menus['eledmt'][key], 'setChecked'):
-                        self._menus['eledmt'][key].setChecked(False)
-            
-            # Reset vibrational DTM menus  
-            if 'mol' in self._menus and 'vibdmt' in self._menus['mol']:
-                self._menus['mol']['vibdmt'].setEnabled(False)
-            if 'vibdmt' in self._menus:
-                for key in self._menus['vibdmt']:
-                    if key != 'menu' and hasattr(self._menus['vibdmt'][key], 'setChecked'):
-                        self._menus['vibdmt'][key].setChecked(False)
 
 
 
@@ -750,6 +713,13 @@ class TCDvis(QMainWindow):
 
     # File opening
     def open_cube(self):
+        if self._actors:
+            self._cleanactors()
+            self._actors = {}
+            self._has_auto_fragment = False  # Reset auto-fragment flag when opening new file       
+            # Reset interface state to prevent issues when switching molecule types
+            self._reset_interface_state()
+ 
         fname = QFileDialog.getOpenFileName(self, 'Select Cube file', '.','*.cube')[0]
         if len(fname) == 0:
             return None
@@ -780,14 +750,7 @@ class TCDvis(QMainWindow):
         except Exception as err:
             print(err)
 
-        self._cleanactors()
-        self._actors = {}
-        self._has_auto_fragment = False  # Reset auto-fragment flag when opening new file
-        
-        
-        # Reset interface state to prevent issues when switching molecule types
-        self._reset_interface_state()
-        
+       
         # for key in self._actors:
         #     self._actors[key] = None
         # update validator
@@ -824,6 +787,8 @@ class TCDvis(QMainWindow):
             self.prop.addItem('EoM')
             self.prop.addItem('EoE')
             self.prop.addItem('MoM')
+            # self._menus['cubes']['dmt'].setEnabled(True)
+        self._updatereder()
 
     def open_aim(self):
         fname = QFileDialog.getOpenFileName(self, 'Select AIM cube file', '.','*.cube')[0]
@@ -915,14 +880,14 @@ class TCDvis(QMainWindow):
         coltyp = 4
         if 'tcddtm' in self._actors:
             self.ren.RemoveActor(self._actors['tcddtm'].actor)
-        if self._menus['etcddtm']['tot'].isChecked() or self._menus['vtcddtm']['tot'].isChecked():
+        if self._menus['etcddtm']['tot'].isChecked():
             flag = True
             veccrd.append(self._fchk.get_com())
             veccrd.append(self._fchk.get_com())
             vectyp.extend([coltyp, -coltyp])
             veccmp.extend(list(self._fchk.get_vol_integrals("1")))
 
-        if self._menus['etcddtm']['frags'].isChecked() or self._menus['vtcddtm']['frags'].isChecked():
+        if self._menus['etcddtm']['frags'].isChecked():
             flag = True
             fragindx = self._fchk.get_frag_indx()
             tmpvec = self._fchk.get_vol_integrals("1", tps='frags', cgs=False)
