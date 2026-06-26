@@ -1,4 +1,5 @@
 # tcdlibx
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20646742.svg)](https://doi.org/10.5281/zenodo.20646742)
 
 A Python library for the manipulation and visualization of volumetric vector-field
 datasets arising from quantum-chemical calculations, with a focus on
