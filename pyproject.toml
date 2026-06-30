@@ -40,4 +40,5 @@ plot_vtcd2d = "progs.plot_vtcd_quiv2D:main"
 
 [project.gui-scripts]
 tcdvis = "progs.tcdvis:main"
+cubevis = "progs.cubevis:main"
 
