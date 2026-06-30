@@ -638,6 +638,9 @@ class TCDvis(QMainWindow):
 
     def _reset_tcd_interface(self):
         """Reset TCD-related interface elements to their default state"""
+        # Reset quiver options
+        self._default["quiver"]["show_rotor"] = False
+
         # Reset state line to default state
         self.stline.setText("1")
         self.stline.setEnabled(False)
@@ -888,6 +891,7 @@ class TCDvis(QMainWindow):
                                          subsamp=self._default["quiver"]["subsample"],
                                          enable_clipping=self._default["quiver"]["enable_clipping"],
                                          clip_bounds=self._default["quiver"]["clip_bounds"],
+                                         show_rotor=self._default["quiver"]["show_rotor"],
                                          vtk_renderer=self.ren,
                                          vtk_render_window=self.vtkWidget.GetRenderWindow(),
                                          vtk_scene_bounds=_vtk_bounds,
@@ -901,6 +905,7 @@ class TCDvis(QMainWindow):
             self._default["quiver"]["clip_bounds"] = quiverprm._clip_bounds
             self._default["quiver"]["lower"] = quiverprm._lower
             self._default["quiver"]["upper"] = quiverprm._upper
+            self._default["quiver"]["show_rotor"] = quiverprm._show_rotor
             
             # Redraw quiver if it exists
             if 'tcd' in self._actors:
@@ -1332,6 +1337,9 @@ class TCDvis(QMainWindow):
         elif prop_cur == "quiver":
             mask_index = filtervecatom(tmp_cube, 0.3)
             tmp_cube.cube[:, mask_index] = 0
+            if self._default["quiver"]["show_rotor"]:
+                rotor_field = tmp_cube._calc_rot()
+                tmp_cube.cube = rotor_field
             tmp_cube.loc2wrd *=  PHYSFACT.bohr2ang
             self._actors['tcd'] = cubetk.quiv3d(tmp_cube,
                                                lower=self._default["quiver"]["lower"],

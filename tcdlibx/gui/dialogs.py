@@ -968,6 +968,7 @@ class QuiverSetupDialog(QDialog, _ClipPlaneMixin):
                  upper: float = 0.01,
                  enable_clipping: bool = False,
                  clip_bounds: tp.Optional[tp.Dict[str, tp.Optional[float]]] = None,
+                 show_rotor: bool = False,
                  vtk_renderer=None,
                  vtk_render_window=None,
                  vtk_scene_bounds: tp.Optional[tp.Tuple[float, ...]] = None,
@@ -989,6 +990,7 @@ class QuiverSetupDialog(QDialog, _ClipPlaneMixin):
         self._subsamp = subsamp
         self._enable_clipping = enable_clipping
         self._clip_bounds = clip_bounds or {}
+        self._show_rotor = show_rotor
         self._init_clip_planes(vtk_renderer, vtk_render_window, vtk_scene_bounds)
         self._lower = lower
         self._upper = upper
@@ -1021,11 +1023,16 @@ class QuiverSetupDialog(QDialog, _ClipPlaneMixin):
         grid.addWidget(message, 6, 0)
         grid.addLayout(self._upperline._hlay, 7, 0)
 
+        # Rotor display checkbox
+        self._show_rotor_checkbox = QCheckBox("Show Rotor (r x J)")
+        self._show_rotor_checkbox.setChecked(show_rotor)
+        grid.addWidget(self._show_rotor_checkbox, 8, 0, 1, 2)
+
         # Spatial clipping section
         self._clipping_checkbox = QCheckBox("Enable Spatial Clipping")
         self._clipping_checkbox.setChecked(enable_clipping)
         self._clipping_checkbox.stateChanged.connect(self._toggle_clipping)
-        grid.addWidget(self._clipping_checkbox, 8, 0, 1, 2)
+        grid.addWidget(self._clipping_checkbox, 9, 0, 1, 2)
         
         # Create clipping controls group (initially hidden)
         self._clipping_frame = QFrame()
@@ -1106,6 +1113,7 @@ class QuiverSetupDialog(QDialog, _ClipPlaneMixin):
         self._subsamp = self._subsampline._getvalue()
         self._lower = self._lowerline._getvalue()
         self._upper = self._upperline._getvalue()
+        self._show_rotor = self._show_rotor_checkbox.isChecked()
         
         # Handle spatial clipping bounds
         self._enable_clipping = self._clipping_checkbox.isChecked()
