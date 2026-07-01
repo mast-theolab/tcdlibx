@@ -39,7 +39,7 @@ def filtervecatom(cubefile: CubeData, thresh: float = 0.1) -> list[int]:
     return list(set(res))
 
 
-def molecular_voxels(cubefile: CubeData, maxthresh: float = 1.5, minthresh: float = .3) -> list[int]:
+def molecular_voxels(cubefile: CubeData, maxthresh: float = 1.5, minthresh: float = .15) -> list[int]:
     """Returns the indices of the grid points within 
 
     Args:
@@ -88,7 +88,7 @@ def vdw_boolean_mask(cubefile: CubeData, thresh: float = 1.0) -> np.ndarray:
     return mask
 
 
-def sample_molecular_volume(cubefile: CubeData, npoints: int, scale: float = 1.5) -> np.ndarray:
+def sample_molecular_volume(cubefile: CubeData, npoints: int, scale: float = .7) -> np.ndarray:
     """Sample points within the molecular volume defined by the VDW radii
 
     Args:
@@ -751,7 +751,7 @@ DEFAULT_PARAMETERS = {'isoval': {'iso': 0.01},
                                     'mspeed': None,
                                     'npoints': 100,
                                     'scalellipse': 3.,
-                                    'scalevdw': 2.0,
+                                    'scalevdw': 1.0,
                                     'sampling_method': 'ellipsoid',
                                     'showdir': False,
                                     'showseeds': False,
