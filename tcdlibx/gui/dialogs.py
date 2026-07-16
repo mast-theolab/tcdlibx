@@ -411,6 +411,8 @@ class TensorSetupDialog(QDialog):
                  surf_color_scheme: str = 'magnitude',
                  atom_filter: tp.Optional[str] = None,
                  show_spheres: bool = False,
+                 nfrags: int = 0,
+                 frag_filter: tp.Optional[tp.List[int]] = None,
                  parent: tp.Optional[tp.Union[QDialog, None]] = None) -> None:
         """Initialize the tensor setup dialog.
 
@@ -425,6 +427,10 @@ class TensorSetupDialog(QDialog):
             surf_color_scheme: Color scheme for surfaces ('magnitude', 'uniform')
             atom_filter: Comma-separated atomic symbols to filter (e.g., "C,N,O")
             show_spheres: Whether to show pale yellow spheres at tensor positions
+            nfrags: Number of fragments currently loaded (0 if none). Enables the
+                fragment filter controls when greater than zero.
+            frag_filter: Initial list of fragment indices to pre-fill the fragment
+                filter (only used when nfrags > 0)
             parent: Parent dialog (optional)
         """
         super().__init__(parent)
@@ -440,6 +446,9 @@ class TensorSetupDialog(QDialog):
         self._surf_color_scheme = surf_color_scheme
         self._atom_filter = atom_filter
         self._show_spheres = show_spheres
+        self._nfrags = nfrags
+        self._use_frags = nfrags > 0 and bool(frag_filter)
+        self._frag_filter_str = ','.join(str(i + 1) for i in frag_filter) if frag_filter else None
         
         self.setWindowTitle("Tensor Visualization Setup")
         
@@ -533,6 +542,25 @@ class TensorSetupDialog(QDialog):
         self._show_spheres_checkbox.stateChanged.connect(self._setshowspheres)
         grid.addWidget(self._show_spheres_checkbox, 9, 0)
         
+        # Fragment filter (only usable if fragments are loaded)
+        if nfrags > 0:
+            frag_checkbox_text = f"Filter by fragment index (1-{nfrags})"
+        else:
+            frag_checkbox_text = "Filter by fragment index (no fragments loaded)"
+        self._frag_checkbox = QCheckBox(frag_checkbox_text)
+        self._frag_checkbox.setEnabled(nfrags > 0)
+        self._frag_checkbox.setChecked(self._use_frags)
+        self._frag_checkbox.stateChanged.connect(self._setusefrags)
+        grid.addWidget(self._frag_checkbox, 10, 0)
+        
+        self._frag_line = QLineEdit()
+        self._frag_line.setPlaceholderText("e.g., 1,2 (comma-separated fragment indices)")
+        self._frag_line.setEnabled(self._use_frags)
+        if self._frag_filter_str:
+            self._frag_line.setText(self._frag_filter_str)
+        self._frag_line.textChanged.connect(self._setfragfilter)
+        grid.addWidget(self._frag_line, 11, 0)
+        
         # Dialog buttons
         QBtn = QDialogButtonBox.Ok | QDialogButtonBox.Cancel
         self.buttonBox = QDialogButtonBox(QBtn)
@@ -570,6 +598,19 @@ class TensorSetupDialog(QDialog):
     def _setshowspheres(self):
         """Set the show spheres flag from the checkbox."""
         self._show_spheres = self._show_spheres_checkbox.isChecked()
+    
+    def _setusefrags(self):
+        """Enable/disable the fragment filter based on the checkbox state."""
+        self._use_frags = self._frag_checkbox.isChecked()
+        self._frag_line.setEnabled(self._use_frags)
+        if not self._use_frags:
+            self._frag_filter_str = None
+    
+    def _setfragfilter(self):
+        """Set the fragment filter string from the text input."""
+        self._frag_filter_str = self._frag_line.text().strip()
+        if not self._frag_filter_str:
+            self._frag_filter_str = None
     
     @property
     def sphere_radius(self) -> float:
@@ -626,6 +667,22 @@ class TensorSetupDialog(QDialog):
     def show_spheres(self) -> bool:
         """Get the show spheres flag."""
         return self._show_spheres
+    
+    @property
+    def frag_filter(self) -> tp.Optional[tp.List[int]]:
+        """Get the fragment filter as a list of fragment indices.
+
+        Returns:
+            None if the fragment filter checkbox is unchecked (or no fragments
+            are loaded), otherwise a list of the selected fragment indices.
+        """
+        if not self._use_frags or not self._frag_filter_str:
+            return None
+        try:
+            indices = [int(x.strip())-1 for x in self._frag_filter_str.split(',') if x.strip()]
+        except ValueError:
+            return None
+        return indices if indices else None
 
 
 class StreamLineSetupDialog(QDialog):

@@ -2,6 +2,8 @@ import random
 import numpy as np
 import typing as tp
 from estampes.data.atom import atomic_data
+from tcdlibx.utils.mol_data import ELEMENTS
+
 # from estampes.tools.atom import convert_labsymb
 from estampes.data.physics import PHYSFACT, phys_fact
 from tcdlibx.utils.var_tools import getellipsoid
@@ -497,6 +499,59 @@ def fibonacci_spiral_samples_on_unit_sphere(nb_samples, mode=0):
         j += 1
     return ss
 
+
+def compute_atom_mask(mol_data,
+                        atom_filter: tp.Optional[tp.List[str]] = None,
+                        frag_filter: tp.Optional[tp.List[int]] = None) -> np.ndarray:
+    """
+    Build a boolean atom mask combining an atomic symbol filter and a
+    fragment index filter. When both are provided, the resulting mask is
+    the intersection (AND) of the two: an atom is selected if it matches
+    the symbol filter AND belongs to one of the selected fragments.
+
+    Args:
+        mol_data: Molecule-like object exposing 'atnum' and, when frag_filter
+            is used, 'get_frag_indx()'
+        atom_filter (list): List of atomic symbols to filter (e.g., ['C', 'N', 'O'])
+        frag_filter (list): List of fragment indices (0-based) to filter
+
+    Returns:
+        np.ndarray: Boolean mask of shape (natoms,)
+    """   
+
+    atomic_numbers = mol_data.atnum
+    natoms = len(atomic_numbers)
+
+    if atom_filter is not None:
+        filter_atomic_numbers = []
+        for symbol in atom_filter:
+            try:
+                filter_atomic_numbers.append(ELEMENTS.index(symbol))
+            except ValueError:
+                raise ValueError(f"Unknown atomic symbol: {symbol}")
+        symbol_mask = np.isin(atomic_numbers, filter_atomic_numbers)
+    else:
+        symbol_mask = np.ones(natoms, dtype=bool)
+
+    if frag_filter is not None:
+        frag_indx = mol_data.get_frag_indx()
+        frag_mask = np.zeros(natoms, dtype=bool)
+        for frag_id in frag_filter:
+            if frag_id < 0 or frag_id >= len(frag_indx):
+                raise ValueError(f"Fragment index out of range: {frag_id}")
+            for atom_idx in frag_indx[frag_id]:
+                frag_mask[atom_idx] = True
+    else:
+        frag_mask = np.ones(natoms, dtype=bool)
+
+    atom_mask = symbol_mask & frag_mask
+
+    if not atom_mask.any():
+        raise ValueError(
+            f"No atoms found matching the filter: atom_filter={atom_filter}, frag_filter={frag_filter}"
+        )
+    return atom_mask
+
 DEFAULT_VIS_VALS = {'isoval': {'iso': 0.01},
                          'vfield': {'vfmax': 1e2,
                                     'vfmin': 1e5,
@@ -521,4 +576,5 @@ DEFAULT_VIS_VALS = {'isoval': {'iso': 0.01},
                                     'color_scheme': 'weight_mag',
                                     'surf_color_scheme': 'magnitude',
                                     'atom_filter': None,
+                                    'frag_filter': None,
                                     'show_spheres': False}}

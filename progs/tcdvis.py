@@ -942,6 +942,7 @@ class TCDvis(QMainWindow):
             opacity=self._default['tensor']['opacity'],
             color_scheme=self._default['tensor']['color_scheme'],
             atom_filter=self._default['tensor']['atom_filter'],
+            frag_filter=self._default['tensor']['frag_filter'],
             show_spheres=self._default['tensor']['show_spheres']
         )
         self.ren.AddActor(self._actors['tensor'].actor)
@@ -972,6 +973,7 @@ class TCDvis(QMainWindow):
             opacity=self._default['tensor']['opacity'],
             color_scheme=self._default['tensor']['surf_color_scheme'],
             atom_filter=self._default['tensor']['atom_filter'],
+            frag_filter=self._default['tensor']['frag_filter'],
         )
         self.ren.AddActor(self._actors['tensor'].actor)
         self._updatereder()
@@ -993,7 +995,10 @@ class TCDvis(QMainWindow):
         atom_filter_str = None
         if self._default['tensor']['atom_filter'] is not None:
             atom_filter_str = ','.join(self._default['tensor']['atom_filter'])
-            
+        
+        # Number of fragments currently loaded (0 disables the fragment filter UI)
+        nfrags = self._fchk.nfrags if self._fchk is not None else 0
+
         tensprm = TensorSetupDialog(
             sphere_radius=self._default['tensor']['sphere_radius'],
             nb_sphere_samples=self._default['tensor']['nb_sphere_samples'],
@@ -1004,7 +1009,9 @@ class TCDvis(QMainWindow):
             color_scheme=self._default['tensor']['color_scheme'],
             surf_color_scheme=self._default['tensor']['surf_color_scheme'],
             atom_filter=atom_filter_str,
-            show_spheres=self._default['tensor']['show_spheres']
+            show_spheres=self._default['tensor']['show_spheres'],
+            nfrags=nfrags,
+            frag_filter=self._default['tensor']['frag_filter']
         )
         tensprm.exec()
         # Update the default values
@@ -1018,6 +1025,7 @@ class TCDvis(QMainWindow):
         self._default['tensor']['surf_color_scheme'] = tensprm.surf_color_scheme
         self._default['tensor']['atom_filter'] = tensprm.atom_filter
         self._default['tensor']['show_spheres'] = tensprm.show_spheres
+        self._default['tensor']['frag_filter'] = tensprm.frag_filter
         
         if 'tensor' in self._actors:
             self.ren.RemoveActor(self._actors['tensor'].actor)

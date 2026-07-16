@@ -10,8 +10,9 @@ import numpy as np
 # Import VTK with error handling
 from tcdlibx.utils.vtk_utils import vtk
 from tcdlibx.calc.cube_manip import CubeData, VecCubeData
-from tcdlibx.graph.helpers import MyvtkActor, fibonacci_spiral_samples_on_unit_sphere
+from tcdlibx.graph.helpers import MyvtkActor, fibonacci_spiral_samples_on_unit_sphere, compute_atom_mask
 # from math import ceil
+
 
 def draw_tensor_spheres(positions: np.ndarray, 
                        tensors: np.ndarray,
@@ -179,6 +180,7 @@ def draw_molecular_tensors(mol_data,
                           opacity: float = 0.8,
                           color_scheme: str = 'magnitude',
                           atom_filter: tp.Optional[tp.List[str]] = None,
+                          frag_filter: tp.Optional[tp.List[int]] = None,
                           show_spheres: bool = False) -> MyvtkActor:
     """
     Convenience function to visualize molecular tensors from VibMolecule data.
@@ -192,14 +194,13 @@ def draw_molecular_tensors(mol_data,
         opacity (float): Opacity of the visualization
         color_scheme (str): Color scheme for vectors ('magnitude', 'weight_mag', 'uniform')
         atom_filter (list): List of atomic symbols to filter (e.g., ['C', 'N', 'O'])
+        frag_filter (list): List of fragment indices (0-based) to restrict to. Combined
+            with atom_filter via AND (an atom must satisfy both filters when both are set)
         show_spheres (bool): Whether to show pale yellow spheres at tensor positions
         
     Returns:
         MyvtkActor: VTK actor containing the tensor visualization
     """
-    
-    # Import ELEMENTS for atomic symbol lookup
-    from tcdlibx.utils.mol_data import ELEMENTS
     
     # Check if object has required attributes
     if not hasattr(mol_data, 'crd') or not hasattr(mol_data, '_moldata'):
@@ -207,33 +208,11 @@ def draw_molecular_tensors(mol_data,
     
     # Get atomic positions and numbers
     positions = mol_data.crd
-    atomic_numbers = mol_data.atnum
     natoms = positions.shape[0]
     
-    # Create atom filter mask if atom_filter is provided
-    if atom_filter is not None:
-        # Convert atomic symbols to atomic numbers
-        filter_atomic_numbers = []
-        for symbol in atom_filter:
-            try:
-                # Find the atomic number for this symbol
-                atomic_number = ELEMENTS.index(symbol)
-                filter_atomic_numbers.append(atomic_number)
-            except ValueError:
-                raise ValueError(f"Unknown atomic symbol: {symbol}")
-        
-        # Create mask for atoms that match the filter
-        atom_mask = np.isin(atomic_numbers, filter_atomic_numbers)
-        
-        if not atom_mask.any():
-            raise ValueError(f"No atoms found matching the filter: {atom_filter}")
-        
-        # Filter positions
-        filtered_positions = positions[atom_mask]
-    else:
-        # No filter, use all atoms
-        atom_mask = np.ones(natoms, dtype=bool)
-        filtered_positions = positions
+    # Create combined atom filter mask (atomic symbol + fragment index)
+    atom_mask = _compute_atom_mask(mol_data, atom_filter=atom_filter, frag_filter=frag_filter)
+    filtered_positions = positions[atom_mask]
     
     # Get tensor data
     if tensor_type.lower() == 'apt':
@@ -477,7 +456,8 @@ def draw_molecular_tensor_surface(mol_data,
                                 surface_scale: float = 1.0,
                                 opacity: float = 0.7,
                                 color_scheme: str = 'magnitude',
-                                atom_filter: tp.Optional[tp.List[str]] = None) -> MyvtkActor:
+                                atom_filter: tp.Optional[tp.List[str]] = None,
+                                frag_filter: tp.Optional[tp.List[int]] = None) -> MyvtkActor:
     """
     Create tensor-based surfaces from molecular data using norm-based surface generation.
     
@@ -490,46 +470,23 @@ def draw_molecular_tensor_surface(mol_data,
         opacity (float): Opacity of the surface
         color_scheme (str): Color scheme for the surface ('magnitude', 'uniform', 'signed')
         atom_filter (list): List of atomic symbols to filter (e.g., ['C', 'N', 'O'])
+        frag_filter (list): List of fragment indices (0-based) to restrict to. Combined
+            with atom_filter via AND (an atom must satisfy both filters when both are set)
         
     Returns:
         MyvtkActor: VTK actor containing the tensor-based surface
     """
-    # Import ELEMENTS for atomic symbol lookup
-    from tcdlibx.utils.mol_data import ELEMENTS
-    
     # Check if object has required attributes
     if not hasattr(mol_data, 'crd') or not hasattr(mol_data, '_moldata'):
         raise ValueError("mol_data must have 'crd' and '_moldata' attributes")
     
     # Get atomic positions and numbers
     positions = mol_data.crd
-    atomic_numbers = mol_data.atnum
     natoms = positions.shape[0]
     
-    # Create atom filter mask if atom_filter is provided
-    if atom_filter is not None:
-        # Convert atomic symbols to atomic numbers
-        filter_atomic_numbers = []
-        for symbol in atom_filter:
-            try:
-                # Find the atomic number for this symbol
-                atomic_number = ELEMENTS.index(symbol)
-                filter_atomic_numbers.append(atomic_number)
-            except ValueError:
-                raise ValueError(f"Unknown atomic symbol: {symbol}")
-        
-        # Create mask for atoms that match the filter
-        atom_mask = np.isin(atomic_numbers, filter_atomic_numbers)
-        
-        if not atom_mask.any():
-            raise ValueError(f"No atoms found matching the filter: {atom_filter}")
-        
-        # Filter positions
-        filtered_positions = positions[atom_mask]
-    else:
-        # No filter, use all atoms
-        atom_mask = np.ones(natoms, dtype=bool)
-        filtered_positions = positions
+    # Create combined atom filter mask (atomic symbol + fragment index)
+    atom_mask = compute_atom_mask(mol_data, atom_filter=atom_filter, frag_filter=frag_filter)
+    filtered_positions = positions[atom_mask]
     
     # Get tensor data
     if tensor_type.lower() == 'apt':
