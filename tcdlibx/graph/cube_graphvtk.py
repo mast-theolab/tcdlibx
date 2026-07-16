@@ -211,7 +211,7 @@ def draw_molecular_tensors(mol_data,
     natoms = positions.shape[0]
     
     # Create combined atom filter mask (atomic symbol + fragment index)
-    atom_mask = _compute_atom_mask(mol_data, atom_filter=atom_filter, frag_filter=frag_filter)
+    atom_mask = compute_atom_mask(mol_data, atom_filter=atom_filter, frag_filter=frag_filter)
     filtered_positions = positions[atom_mask]
     
     # Get tensor data
