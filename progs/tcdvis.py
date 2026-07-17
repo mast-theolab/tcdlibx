@@ -17,7 +17,7 @@ import numpy as np
 from PySide6.QtCore import QLocale, QRect, QTimer
 from PySide6.QtGui import QAction, QDoubleValidator, QIcon, QIntValidator
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout,
+    QApplication, QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout,
     QLabel, QLineEdit, QMainWindow, QPushButton, QSizePolicy, QSpacerItem,
     QStyle, QVBoxLayout
 )
@@ -375,8 +375,12 @@ class TCDvis(QMainWindow):
         self.isoline.setText(f"{self._default['isoval']['iso']:.6f}")
         self.isoline.editingFinished.connect(self._setisoval)
         self.isoline.setEnabled(False)
+        self._nucfieldch = QCheckBox("Add nuc field", self)
+        self._nucfieldch.setEnabled(False)
+        self._nucfieldch.stateChanged.connect(self._togglenucfield)
         hlay3 = QHBoxLayout()
         hlay3.addWidget(self.etcdch)
+        hlay3.addWidget(self._nucfieldch)
         hlay3.addItem(QSpacerItem(100, 10, QSizePolicy.Expanding))
         hlay.addWidget(message)
         hlay.addWidget(self.isoline)
@@ -648,6 +652,10 @@ class TCDvis(QMainWindow):
         
         # Reset TCD checkbox/control
         self.etcdch.setEnabled(False)
+
+        # Reset 'Add nuc field' control
+        self._nucfieldch.setEnabled(False)
+        self._nucfieldch.setChecked(False)
         
         # Reset isoline control
         self.isoline.setText(f"{self._default['isoval']['iso']:.6f}")
@@ -932,6 +940,12 @@ class TCDvis(QMainWindow):
             self.ren.RemoveActor(self._actors['tcd'].actor)
             self.showtcd()
 
+    def _togglenucfield(self):
+        # Redraw the currently displayed field so it picks up/drops the
+        # nuclear contribution without touching the original cube data
+        if 'tcd' in self._actors:
+            self.showtcd()
+
     # File opening
     def open_fchk(self):
         fname = QFileDialog.getOpenFileName(self, 'Select FCHK file', '.','*.fchk')[0]
@@ -1149,6 +1163,8 @@ class TCDvis(QMainWindow):
                 # Enable fragment contributions if AIM data and fragments are available
                 if self._fchk._aimdata is not None and self._fchk._frags is not None:
                     self._menus['vtcddtm']['frags'].setEnabled(True)
+            # 'Add nuc field' is only meaningful for VTCD data
+            self._nucfieldch.setEnabled(self._moltype == 'vib')
         else:
             self.stline.setStyleSheet("color: black;  background-color: white")
             self.etcdch.setEnabled(False)
@@ -1157,6 +1173,8 @@ class TCDvis(QMainWindow):
                 self._menus['etcd']['dmt'].setEnabled(False)
             elif self._moltype == 'vib':
                 self._menus['vtcd']['dmt'].setEnabled(False)
+            self._nucfieldch.setEnabled(False)
+            self._nucfieldch.setChecked(False)
         if 'mfpdtm' in self._actors:
             self.showdmt()
         
@@ -1289,6 +1307,12 @@ class TCDvis(QMainWindow):
             self._updatereder()
             return None
         tmp_cube = copy.deepcopy(self._fchk.get_tcd(self._activest))
+        if self._moltype == 'vib' and self._nucfieldch.isEnabled() and self._nucfieldch.isChecked():
+            # Add the artificial nuclear field on top of the copy only,
+            # leaving the original VTCD cube data untouched
+            # I put minus becasue the nuclear field is opposite to the electronic one
+            # Check it
+            tmp_cube.cube = tmp_cube.cube - self._fchk._nuc_field(self._activest)
         tmp_iso = [-self._default['isoval']['iso'],
                    self._default['isoval']['iso']]
         if prop_cur == "streamlines":

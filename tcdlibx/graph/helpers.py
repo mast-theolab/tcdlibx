@@ -401,7 +401,58 @@ class VibMolecule(Molecule):
         if cgs:
             res = (edip_cgs(res[0], self.get_freq(vib)),
                    mdip_cgs(res[1], self.get_freq(vib))) 
-        return res      
+        return res
+
+    def _nuc_field(self, vib: int) -> np.ndarray:
+        """Build an artificial vector field with the nuclear contribution to
+        the electric dipole transition moment (lx . apt_nuclear) of each atom
+        spread over the voxels of the vibration's VTCD cube grid.
+
+        For each atom, only the voxels within the atom's VdW radius are
+        populated. The atom's nuclear EDTM contribution is distributed among
+        those voxels with weights decaying as 1/r**3 (r being the distance
+        from the atom center), normalized so that integrating the resulting
+        field over the grid (cube.integrate()) recovers the atom's nuclear
+        EDTM contribution exactly.
+
+        Args:
+            vib (int): vibration index
+
+        Returns:
+            np.ndarray: vector field of shape (3, ntotal), where ntotal is
+                the number of grid points of the vibration's VTCD cube
+        """
+        if vib > self._nvib - 1 or vib < 0:
+            raise NoValidData("Molecule._nuc_field", "Vibration out of range")
+        if vib not in self._vtcd:
+            raise NoValidData("Molecule._nuc_field", "VTCD cube not available for this vibration")
+
+        cube = self._vtcd[vib]
+        if not cube.box.size:
+            cube.make_box()
+        ntotal = cube.npts[0] * cube.npts[1] * cube.npts[2]
+        voxvol = cube.get_voxvol()
+
+        lx = self._moldata['lx'][vib]
+        aptnuc = self._moldata['aptnuc']
+        radii = [atomic_data(int(x))[int(x)]['rvdw']['alvarez13'] / PHYSFACT.bohr2ang
+                 for x in cube.ian]
+
+        field = np.zeros((3, ntotal))
+        for i in range(self.natoms):
+            lx_i = lx[i*3:i*3+3]
+            apt_i = aptnuc[i*3:i*3+3, :]
+            edtm_i = np.einsum("j,jk->k", lx_i, apt_i)
+            indices = cube.indexinsphere(cube.crd[i], radii[i])
+            if indices.size == 0:
+                continue
+            deltas = cube.box[:, indices] - cube.crd[i][:, np.newaxis]
+            r3 = np.sqrt(np.einsum("ij,ij->j", deltas, deltas))**3
+            r3 = np.maximum(r3, 1e-10)
+            weights = 1. / r3
+            weights /= weights.sum()
+            field[:, indices] += edtm_i[:, np.newaxis] * weights[np.newaxis, :] / voxvol
+        return field
 
     def add_tcd(self, state: int, cubedata: VtcdData):
         if state > self._nvib - 1 or state < 0:
