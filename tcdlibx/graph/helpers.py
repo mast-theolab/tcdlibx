@@ -577,4 +577,5 @@ DEFAULT_VIS_VALS = {'isoval': {'iso': 0.01},
                                     'surf_color_scheme': 'magnitude',
                                     'atom_filter': None,
                                     'frag_filter': None,
-                                    'show_spheres': False}}
+                                    'show_spheres': False,
+                                    'tensor_level': 'tot'}}

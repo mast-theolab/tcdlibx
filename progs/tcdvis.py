@@ -936,6 +936,7 @@ class TCDvis(QMainWindow):
         self._actors['tensor'] = cubetk.draw_molecular_tensors(
             self._fchk,
             tensor_type=ttype,
+            tensor_level=self._default['tensor']['tensor_level'],
             sphere_radius=self._default['tensor']['sphere_radius'],
             nb_sphere_samples=self._default['tensor']['nb_sphere_samples'],
             vector_scale=self._default['tensor']['vector_scale'],
@@ -967,6 +968,7 @@ class TCDvis(QMainWindow):
         self._actors['tensor'] = cubetk.draw_molecular_tensor_surface(
             self._fchk,
             tensor_type=ttype,
+            tensor_level=self._default['tensor']['tensor_level'],
             sphere_radius=self._default['tensor']['sphere_radius'],
             nb_sphere_samples=self._default['tensor']['nb_sphere_surface'],
             surface_scale=self._default['tensor']['surface_scale'],
@@ -1010,6 +1012,7 @@ class TCDvis(QMainWindow):
             surf_color_scheme=self._default['tensor']['surf_color_scheme'],
             atom_filter=atom_filter_str,
             show_spheres=self._default['tensor']['show_spheres'],
+            tensor_level=self._default['tensor']['tensor_level'],
             nfrags=nfrags,
             frag_filter=self._default['tensor']['frag_filter']
         )
@@ -1025,6 +1028,7 @@ class TCDvis(QMainWindow):
         self._default['tensor']['surf_color_scheme'] = tensprm.surf_color_scheme
         self._default['tensor']['atom_filter'] = tensprm.atom_filter
         self._default['tensor']['show_spheres'] = tensprm.show_spheres
+        self._default['tensor']['tensor_level'] = tensprm.tensor_level
         self._default['tensor']['frag_filter'] = tensprm.frag_filter
         
         if 'tensor' in self._actors:

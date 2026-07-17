@@ -174,6 +174,7 @@ def draw_tensor_spheres(positions: np.ndarray,
 
 def draw_molecular_tensors(mol_data, 
                           tensor_type: str = 'apt',
+                          tensor_level: str = 'tot',
                           sphere_radius: float = 0.5,
                           nb_sphere_samples: int = 50,
                           vector_scale: float = 2,
@@ -219,7 +220,15 @@ def draw_molecular_tensors(mol_data,
         if mol_data.apt is None:
             raise ValueError("APT tensor data not available in molecule")
         # APT tensors are stored as (natoms*3, 3) - reshape to (natoms, 3, 3)
-        apt_data = mol_data.apt
+        if tensor_level == 'tot':
+            apt_data = mol_data.apt
+        elif tensor_level == 'ele':
+            apt_data = mol_data._moldata['aptele']
+        elif tensor_level == 'nuc':
+            apt_data = mol_data._moldata['aptnuc']
+        else:
+            raise ValueError("tensor_level must be 'tot', 'ele', or 'nuc'")
+
         if apt_data.ndim == 2:
             # Reshape from (natoms*3, 3) to (natoms, 3, 3)
             full_tensors = apt_data.reshape(natoms, 3, 3)
@@ -229,7 +238,14 @@ def draw_molecular_tensors(mol_data,
         if mol_data.aat is None:
             raise ValueError("AAT tensor data not available in molecule")
         # AAT tensors are stored as (natoms*3, 3) - reshape to (natoms, 3, 3)
-        aat_data = mol_data.aat
+        if tensor_level == 'tot':
+            aat_data = mol_data.aat
+        elif tensor_level == 'ele':
+            aat_data = mol_data._moldata['aatele']
+        elif tensor_level == 'nuc':
+            aat_data = mol_data._moldata['aatnuc']
+        else:
+            raise ValueError("tensor_level must be 'tot', 'ele', or 'nuc'")
         if aat_data.ndim == 2:
             # Reshape from (natoms*3, 3) to (natoms, 3, 3)
             full_tensors = aat_data.reshape(natoms, 3, 3)
@@ -451,6 +467,7 @@ def draw_tensor_surface_from_norms(positions: np.ndarray,
 
 def draw_molecular_tensor_surface(mol_data,
                                 tensor_type: str = 'apt',
+                                tensor_level: str = 'tot',
                                 sphere_radius: float = 0.5,
                                 nb_sphere_samples: int = 50,
                                 surface_scale: float = 1.0,
@@ -464,6 +481,7 @@ def draw_molecular_tensor_surface(mol_data,
     Args:
         mol_data: VibMolecule (or object with compatible interface)
         tensor_type (str): Type of tensor to visualize ('apt' or 'aat')
+        tensor_level (str): Contribution to visualize ('tot', 'ele', or 'nuc')
         sphere_radius (float): Base radius for the sampling spheres
         nb_sphere_samples (int): Number of fibonacci samples on each sphere
         surface_scale (float): Scale factor for surface modulation based on magnitudes
@@ -493,7 +511,14 @@ def draw_molecular_tensor_surface(mol_data,
         if mol_data.apt is None:
             raise ValueError("APT tensor data not available in molecule")
         # APT tensors are stored as (natoms*3, 3) - reshape to (natoms, 3, 3)
-        apt_data = mol_data.apt
+        if tensor_level == 'tot':
+            apt_data = mol_data.apt
+        elif tensor_level == 'ele':
+            apt_data = mol_data._moldata['aptele']
+        elif tensor_level == 'nuc':
+            apt_data = mol_data._moldata['aptnuc']
+        else:
+            raise ValueError("tensor_level must be 'tot', 'ele', or 'nuc'")
         if apt_data.ndim == 2:
             # Reshape from (natoms*3, 3) to (natoms, 3, 3)
             full_tensors = apt_data.reshape(natoms, 3, 3)
@@ -503,7 +528,14 @@ def draw_molecular_tensor_surface(mol_data,
         if mol_data.aat is None:
             raise ValueError("AAT tensor data not available in molecule")
         # AAT tensors are stored as (natoms*3, 3) - reshape to (natoms, 3, 3)
-        aat_data = mol_data.aat
+        if tensor_level == 'tot':
+            aat_data = mol_data.aat
+        elif tensor_level == 'ele':
+            aat_data = mol_data._moldata['aatele']
+        elif tensor_level == 'nuc':
+            aat_data = mol_data._moldata['aatnuc']
+        else:
+            raise ValueError("tensor_level must be 'tot', 'ele', or 'nuc'")
         if aat_data.ndim == 2:
             # Reshape from (natoms*3, 3) to (natoms, 3, 3)
             full_tensors = aat_data.reshape(natoms, 3, 3)

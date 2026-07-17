@@ -411,6 +411,7 @@ class TensorSetupDialog(QDialog):
                  surf_color_scheme: str = 'magnitude',
                  atom_filter: tp.Optional[str] = None,
                  show_spheres: bool = False,
+                 tensor_level: str = 'tot',
                  nfrags: int = 0,
                  frag_filter: tp.Optional[tp.List[int]] = None,
                  parent: tp.Optional[tp.Union[QDialog, None]] = None) -> None:
@@ -427,6 +428,7 @@ class TensorSetupDialog(QDialog):
             surf_color_scheme: Color scheme for surfaces ('magnitude', 'uniform')
             atom_filter: Comma-separated atomic symbols to filter (e.g., "C,N,O")
             show_spheres: Whether to show pale yellow spheres at tensor positions
+            tensor_level: Contribution to visualize ('tot', 'ele', or 'nuc')
             nfrags: Number of fragments currently loaded (0 if none). Enables the
                 fragment filter controls when greater than zero.
             frag_filter: Initial list of fragment indices to pre-fill the fragment
@@ -446,6 +448,7 @@ class TensorSetupDialog(QDialog):
         self._surf_color_scheme = surf_color_scheme
         self._atom_filter = atom_filter
         self._show_spheres = show_spheres
+        self._tensor_level = tensor_level
         self._nfrags = nfrags
         self._use_frags = nfrags > 0 and bool(frag_filter)
         self._frag_filter_str = ','.join(str(i + 1) for i in frag_filter) if frag_filter else None
@@ -542,6 +545,21 @@ class TensorSetupDialog(QDialog):
         self._show_spheres_checkbox.stateChanged.connect(self._setshowspheres)
         grid.addWidget(self._show_spheres_checkbox, 9, 0)
         
+        # Tensor level (total / electronic / nuclear contribution)
+        tensor_level_label = QLabel("Tensor contribution:")
+        self._tensor_level_combo = QComboBox()
+        self._tensor_level_combo.addItem("Total", 'tot')
+        self._tensor_level_combo.addItem("Electronic", 'ele')
+        self._tensor_level_combo.addItem("Nuclear", 'nuc')
+        idx = self._tensor_level_combo.findData(tensor_level)
+        self._tensor_level_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self._tensor_level_combo.currentIndexChanged.connect(self._settensorlevel)
+        
+        tensor_level_hlay = QHBoxLayout()
+        tensor_level_hlay.addWidget(tensor_level_label)
+        tensor_level_hlay.addWidget(self._tensor_level_combo)
+        grid.addLayout(tensor_level_hlay, 10, 0)
+        
         # Fragment filter (only usable if fragments are loaded)
         if nfrags > 0:
             frag_checkbox_text = f"Filter by fragment index (1-{nfrags})"
@@ -551,7 +569,7 @@ class TensorSetupDialog(QDialog):
         self._frag_checkbox.setEnabled(nfrags > 0)
         self._frag_checkbox.setChecked(self._use_frags)
         self._frag_checkbox.stateChanged.connect(self._setusefrags)
-        grid.addWidget(self._frag_checkbox, 10, 0)
+        grid.addWidget(self._frag_checkbox, 11, 0)
         
         self._frag_line = QLineEdit()
         self._frag_line.setPlaceholderText("e.g., 1,2 (comma-separated fragment indices)")
@@ -559,7 +577,7 @@ class TensorSetupDialog(QDialog):
         if self._frag_filter_str:
             self._frag_line.setText(self._frag_filter_str)
         self._frag_line.textChanged.connect(self._setfragfilter)
-        grid.addWidget(self._frag_line, 11, 0)
+        grid.addWidget(self._frag_line, 12, 0)
         
         # Dialog buttons
         QBtn = QDialogButtonBox.Ok | QDialogButtonBox.Cancel
@@ -598,6 +616,10 @@ class TensorSetupDialog(QDialog):
     def _setshowspheres(self):
         """Set the show spheres flag from the checkbox."""
         self._show_spheres = self._show_spheres_checkbox.isChecked()
+    
+    def _settensorlevel(self):
+        """Set the tensor level (total/electronic/nuclear) from the combo box."""
+        self._tensor_level = self._tensor_level_combo.currentData()
     
     def _setusefrags(self):
         """Enable/disable the fragment filter based on the checkbox state."""
@@ -667,6 +689,11 @@ class TensorSetupDialog(QDialog):
     def show_spheres(self) -> bool:
         """Get the show spheres flag."""
         return self._show_spheres
+    
+    @property
+    def tensor_level(self) -> str:
+        """Get the tensor contribution level ('tot', 'ele', or 'nuc')."""
+        return self._tensor_level
     
     @property
     def frag_filter(self) -> tp.Optional[tp.List[int]]:
