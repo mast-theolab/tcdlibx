@@ -6,7 +6,7 @@ Genenarl function to operate with vectors and matrices
 import os
 import typing as tp
 import numpy as np
-from .types import Array3F
+# from .types import Array3F
 from .custom_except import NoValidData, NoValidArg
 from .mol_data import AT_RVDW
 
@@ -232,7 +232,13 @@ def range_parse(string, dimension=None, flatten=False):
             else:
                 grp_elem.append(toadd)
     if flatten:
-        grp_elem = [item for sublist in grp_elem for item in sublist]
+        flattened = []
+        for item in grp_elem:
+            if isinstance(item, list):
+                flattened.extend(item)
+            else:
+                flattened.append(item)
+        grp_elem = flattened
     return grp_elem
 
 
@@ -404,7 +410,7 @@ def print_lines(lines_to_prt, state, vib, fold):
     """
     Stupid function to print a formatted line
     """
-    ofile = open(os.path.join(fold, 'dipolePrint_VibState{}_{}.dat'.format(vib, state)), 'w')
+    ofile = open(os.path.join(fold, 'dipolePrint_VibState{}_{}.dat'.format(vib, state)), 'w', encoding='utf-8')
     ofile.write('# {}    {}    {}\n'.format('N', 'EDTM', 'MDTM'))
     for line in lines_to_prt:
         ofile.write(line)

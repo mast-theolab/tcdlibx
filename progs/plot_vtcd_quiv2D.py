@@ -19,6 +19,7 @@ import matplotlib.pyplot as plt
 from estampes.data.physics import PHYSFACT
 import tcdlibx.calc.cube_manip as cb
 import tcdlibx.graph.cube_graphic as cbplt
+from tcdlibx.graph.helpers import molecular_voxels
 from tcdlibx.utils.custom_except import NoValidData
 import tcdlibx.io.fchk_io as fio
 # import service file
@@ -97,7 +98,21 @@ def build_parser():
                       choices=('pdf', 'eps', 'png'),
                       default='pdf',
                       help='Figure extension')
-    # Molecule Drawing Parameters
+    draw.add_argument('--dpi', type=int, default=100,
+                      help='Resolution in DPI for the saved figure (default: 100; use 300 for print quality PNG)')
+    # Quiver parameters
+    quiver = par.add_argument_group('Quiver Parameters')
+    quiver.add_argument('--quivbkg', action='store_true',
+                      help='''Quiver background based on norm of the vector field''')
+    quiver.add_argument('--filtnuclei', action='store_true',
+                      help='''Filter out the current density vectors that are too close to the nuclei''')
+    quiver.add_argument('--qlower', type=float, default=0.0001,
+                      help='''Lower bound for the vector field values''')
+    quiver.add_argument('--qupper', type=float, default=0.01,
+                      help='''Upper bound for the vector field values''')
+    quiver.add_argument('--subsample', type=int, default=1,
+                      help='''Show only every nth vector (default: 1, no subsampling)''')
+    
     molecule = par.add_argument_group('Drawing Molecule Parameters')
     molecule.add_argument('--scaleNuc', type=float, default=1.0,
                           help='''Enter the scaling factor for Nucleus circles''')
@@ -119,12 +134,13 @@ def build_parser():
                       help='Lower bound along z for the current vectors')
     cube.add_argument('--zmax', type=float,
                       help='Upper bound along z for the current vectors')
-    cube.add_argument('--saveSignedCube', action='store_true',
-                      help='Save the last computed cube')
+    # cube.add_argument('--saveSignedCube', action='store_true',
+    #                   help='Save the last computed cube')
     cube.add_argument('--printVec', action='store_true',
                       help='print EDTM and MDTM')
-    cube.add_argument('--matchEDTM', action='store_true',
-                      help='Rotate the cube data set such as EDTM lies on the x axis')
+    # BUG to befixed
+    # cube.add_argument('--matchEDTM', action='store_true',
+    #                   help='Rotate the cube data set such as EDTM lies on the x axis')
     # PARTITIONING DATA
     # 
     part = par.add_argument_group('Partitioning Cube parameters')
@@ -228,6 +244,9 @@ Coordinates (in Bohr)
     except OSError:
         print('{} file does not exist. exit'.format(OPTS.cubefile))
         sys.exit()
+    if OPTS.filtnuclei:
+        _mvox = molecular_voxels(cubdat, minthresh=0., maxthresh=0.15)
+        cubdat.cube[:, _mvox] = 0. 
     cubdat.make_box()
     AT_BONDS = cbplt.get_connect(cubdat.ian, cubdat.crd)
 
@@ -244,43 +263,43 @@ Coordinates (in Bohr)
     # BUG
     if OPTS.xmin or OPTS.xmax or OPTS.ymin or \
        OPTS.ymax or OPTS.zmin or OPTS.zmax:
-        vec = cbplt.set_subgrid(cubdat, OPTS.xmin,
-                                OPTS.xmax, OPTS.ymin,
-                                OPTS.ymax, OPTS.zmin,
-                                OPTS.zmax)
+        cubdat.cube = cbplt.set_subgrid(cubdat, OPTS.xmin,
+                                        OPTS.xmax, OPTS.ymin,
+                                        OPTS.ymax, OPTS.zmin,
+                                        OPTS.zmax)
 
     # DEBUG
-    if OPTS.printVec or OPTS.saveSignedCube \
-       or OPTS.matchEDTM:
-        cubdat = cb.VtcdData(cubdat)
-        mu_state = cubdat.mu_integrate()
-        if not OPTS.matchEDTM:
-            mg_state = cubdat.mag_integrate()
-        if OPTS.printVec:
-            dcube = cb.CubeData()
-            dcube.natoms = 0
-            dcube.origin = np.array([0., 0., 0.])
-            dcube.npts = [2, 2, 2]
-            dcube.nval = 3
-            dcube.step = np.array([[1, 0, 0],
-                                   [0, 1, 0],
-                                   [0, 0, 1]])
-            dcube.cube = np.zeros((3, 8))
-            dcube.cube[:, 0] = mu_state
-            cb.print_cube(dcube, 'ELC', OPTS.vibstate)
-            dcube.cube[:, 0] = mg_state
-            cb.print_cube(dcube, 'MAG', OPTS.vibstate)
+    # if OPTS.printVec or OPTS.saveSignedCube \
+    #    or OPTS.matchEDTM:
+    #     cubdat = cb.VtcdData(cubdat)
+    #     mu_state = cubdat.mu_integrate()
+    #     if not OPTS.matchEDTM:
+    #         mg_state = cubdat.mag_integrate()
+    #     if OPTS.printVec:
+    #         dcube = cb.CubeData()
+    #         dcube.natoms = 0
+    #         dcube.origin = np.array([0., 0., 0.])
+    #         dcube.npts = [2, 2, 2]
+    #         dcube.nval = 3
+    #         dcube.step = np.array([[1, 0, 0],
+    #                                [0, 1, 0],
+    #                                [0, 0, 1]])
+    #         dcube.cube = np.zeros((3, 8))
+    #         dcube.cube[:, 0] = mu_state
+    #         cb.print_cube(dcube, 'ELC', OPTS.vibstate)
+    #         dcube.cube[:, 0] = mg_state
+    #         cb.print_cube(dcube, 'MAG', OPTS.vibstate)
 
     if OPTS.axis:
-        if OPTS.matchEDTM:
-            # BUG
-            # the cube and grind has been rotated
-            RMAT = cubdat.rotate(mu_state)
-            for ith in range(len(mol['crd'])):
-                mol['crd'][ith] = list(np.dot(RMAT, mol['crd'][ith]))
-                all_nmodes[int(idvstate-1),
-                           ith*3:ith*3+3] = np.dot(RMAT, all_nmodes[int(idvstate-1),
-                                                                    ith*3:ith*3+3])
+        # if OPTS.matchEDTM:
+        #     # BUG
+        #     # the cube and grind has been rotated
+        #     RMAT = cubdat.rotate(mu_state)
+        #     for ith in range(len(mol['crd'])):
+        #         mol['crd'][ith] = list(np.dot(RMAT, mol['crd'][ith]))
+        #         all_nmodes[int(idvstate-1),
+        #                    ith*3:ith*3+3] = np.dot(RMAT, all_nmodes[int(idvstate-1),
+        #                                                             ith*3:ith*3+3])
 
         fig0, ax0 = plt.subplots()
         _, x_ax, y_ax = cbplt.check_ax(OPTS.axis)
@@ -304,17 +323,22 @@ Coordinates (in Bohr)
         ax0.set_xlabel(r'$\mathit{{{}}}$ axis / Bohr'.format(label[x_ax]))
         ax0.set_ylabel(r'$\mathit{{{}}}$ axis / Bohr'.format(label[y_ax]))
         cbplt.draw_mol2d(ax0, cubdat.crd, cubdat.ian, OPTS.axis, SCF,
-                         conmat=AT_BONDS, to_bohr=True)
+                         conmat=AT_BONDS, to_bohr=True, vollimit=[OPTS.xmin, OPTS.xmax, OPTS.ymin, OPTS.ymax, OPTS.zmin, OPTS.zmax])
         if OPTS.printNM:
             cbplt.draw_nm2dcw(ax0, cubdat.crd, all_nmodes[int(idvstate-1)],
                             # OPTS.axis, OPTS.scaleNM, to_bohr=True)
                               cubdat.ian, OPTS.axis, OPTS.scaleNM, to_bohr=True)
         if OPTS.type == 'quiver':
-            QUIV = cbplt.quiver_plt(ax0, cubdat, OPTS.axis, OPTS.vscale)
-            fig0.savefig(os.path.join(ressubfolder, 'quiv2D.{}'.format(OPTS.figext)))
+            clim = [OPTS.qlower, OPTS.qupper]
+            bkg = False
+            if OPTS.quivbkg:
+                bkg = True
+            QUIV = cbplt.quiver_plt(ax0, cubdat, OPTS.axis, OPTS.vscale, background=bkg,
+                                clim=clim, subsample=OPTS.subsample)
+            fig0.savefig(os.path.join(ressubfolder, 'quiv2D.{}'.format(OPTS.figext)), dpi=OPTS.dpi)
         elif OPTS.type == 'stream':
             STRM = cbplt.stream_plt(ax0, cubdat, OPTS.axis)
-            fig0.savefig(os.path.join(ressubfolder, 'stream2D.{}'.format(OPTS.figext)))
+            fig0.savefig(os.path.join(ressubfolder, 'stream2D.{}'.format(OPTS.figext)), dpi=OPTS.dpi)
         else:
             STRM = cbplt.stream2_plt(ax0, cubdat, OPTS.axis)
             if OPTS.type == 'animated_stream':
@@ -322,13 +346,13 @@ Coordinates (in Bohr)
                 plt.show()
             else:
                 fig0.savefig(os.path.join(ressubfolder,
-                                          'stream2D.{}'.format(OPTS.figext)))
+                                          'stream2D.{}'.format(OPTS.figext)), dpi=OPTS.dpi)
         plt.close()
 
-    if OPTS.saveSignedCube:
-        VEC1, VEC2 = cb.mask_cube(cubdat, mu_state)
-        cb.print_cube(cubdat, 'Plus', OPTS.vibstate, vec_pr=VEC1)
-        cb.print_cube(cubdat, 'Minus', OPTS.vibstate, vec_pr=VEC2)
+    #if OPTS.saveSignedCube:
+    #    VEC1, VEC2 = cb.mask_cube(cubdat, mu_state)
+    #    cb.print_cube(cubdat, 'Plus', OPTS.vibstate, vec_pr=VEC1)
+    #    cb.print_cube(cubdat, 'Minus', OPTS.vibstate, vec_pr=VEC2)
 
 
 if __name__ == '__main__':

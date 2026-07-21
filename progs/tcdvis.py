@@ -24,13 +24,13 @@ from PySide6.QtWidgets import (
 
 # Local imports - tcdlibx package
 from tcdlibx.calc.cube_manip import VecCubeData, VtcdData, cube_parser
-from tcdlibx.graph.helpers import EleMolecule, VibMolecule, filtervecatom, DEFAULT_VIS_VALS
+from tcdlibx.graph.helpers import EleMolecule, VibMolecule, filtervecatom, sample_molecular_volume, DEFAULT_PARAMETERS, write_molecule_pov, vdw_boolean_mask
 import tcdlibx.graph.cube_graphvtk as cubetk
 from tcdlibx.gui.dialogs import (
-    SavePngDialog, SavePngSeriesDialog, StreamLineSetupDialog, TCDDialog, QuiverSetupDialog, TensorSetupDialog
+    SavePngDialog, SavePngSeriesDialog, StreamLineSetupDialog, TCDDialog, QuiverSetupDialog, SaveSceneDialog, ExportPOVDialog, NMConfigDialog, MoleculeConfigDialog, TensorSetupDialog
 )
 from tcdlibx.io.estp_io import PHYSFACT, get_elemol, get_vibmol
-from tcdlibx.io.jsonio import read_json
+from tcdlibx.io.jsonio import read_json, write_json
 from tcdlibx.utils.custom_except import NoValidData
 from tcdlibx.utils.var_tools import range_parse
 from tcdlibx.utils.vtk_utils import QVTKRenderWindowInteractor, vtk
@@ -77,6 +77,7 @@ class TCDvis(QMainWindow):
         self._activest = 0
         self._actors = {}
         self._menus = {}
+        self._has_auto_fragment = False  # Track if automatic fragment for missing atoms was created
         
         # Animation variables for streamline particles
         self._animation_timer = None
@@ -84,8 +85,9 @@ class TCDvis(QMainWindow):
         self._animation_step = 0
         self._animation_speed = 0.02
         self._show_particles = False
+        self._seeds = None
         
-        self._default = copy.deepcopy(DEFAULT_VIS_VALS) 
+        self._default = copy.deepcopy(DEFAULT_PARAMETERS) 
 
         self.initUI()
 
@@ -121,6 +123,26 @@ class TCDvis(QMainWindow):
         gifButton.setStatusTip('Save pngs to make a gif')
         gifButton.triggered.connect(self.save_png_rotation)
         fileMenu.addAction(gifButton)
+        # Open a Scene
+        osceneButton = QAction(QIcon(''), 'OpenScene', self)
+        #openButton.setShortcut('Ctrl+O')
+        osceneButton.setStatusTip('Open a VTKScene from a JSON file')
+        osceneButton.triggered.connect(self.open_scene)
+        fileMenu.addAction(osceneButton)
+        # Save a Scene
+        ssceneButton = QAction(QIcon(''), 'SaveScene', self)
+        # saveButton.setShortcut('Ctrl+S')
+        ssceneButton.setStatusTip('Save a VKScene in a JSON file')
+        ssceneButton.triggered.connect(self.save_scene)
+        fileMenu.addAction(ssceneButton)
+        # Export scene as POV-Ray file
+        exportPOVButton = QAction(QIcon(''), 'ExportScenePOV', self)
+        exportPOVButton.setStatusTip('Export the current scene to a POV-Ray file')
+        exportPOVButton.triggered.connect(self.export_scene_pov)
+        fileMenu.addAction(exportPOVButton)
+        # For Now disable export POV-Ray until we have a better implementation
+        exportPOVButton.setEnabled(False)
+
         ## Exit
         exitButton = QAction(QIcon('exit24.png'), 'Exit', self)
         exitButton.setShortcut('Ctrl+Q')
@@ -136,6 +158,24 @@ class TCDvis(QMainWindow):
         grpsButton.setEnabled(False)
         self._menus['mol']['grps'] = grpsButton
         fileMol.addAction(grpsButton)
+        
+        # Molecule transparency toggle
+        transparentButton = QAction(QIcon(''), 'Transparent Molecule', self)
+        transparentButton.setStatusTip('Make molecule transparent (alpha 0.3)')
+        transparentButton.setCheckable(True)
+        transparentButton.triggered.connect(self.toggle_mol_transparency)
+        transparentButton.setEnabled(False)
+        self._menus['mol']['transparent'] = transparentButton
+        fileMol.addAction(transparentButton)
+        
+        # Molecule settings
+        molSettingsButton = QAction(QIcon(''), 'Settings', self)
+        molSettingsButton.setStatusTip('Configure molecule display settings (wireframe, opacity, radii)')
+        molSettingsButton.triggered.connect(self.configure_molecule)
+        molSettingsButton.setEnabled(False)
+        self._menus['mol']['settings'] = molSettingsButton
+        fileMol.addAction(molSettingsButton)
+        
         # NM buttons
         nmmenu = fileMol.addMenu('NM')
         nmmenu.setEnabled(False)
@@ -148,13 +188,12 @@ class TCDvis(QMainWindow):
         nmmenu.addAction(nmButton)
         self._menus['mol']['nm']['menu'] = nmmenu
         self._menus['mol']['nm']['disp'] = nmButton
-        nmRevert = QAction(QIcon(''), 'Change NM phase', self)
-        nmRevert.setStatusTip('Change the phase of the NM vectors')
-        nmRevert.setCheckable(True)
-        nmRevert.triggered.connect(self.shownm)
-        nmRevert.setEnabled(True)
-        nmmenu.addAction(nmRevert)
-        self._menus['mol']['nm']['revert'] = nmRevert
+        nmConfig = QAction(QIcon(''), 'Configure NM', self)
+        nmConfig.setStatusTip('Configure normal mode display options (phase, scale, color)')
+        nmConfig.triggered.connect(self.configure_nm)
+        nmConfig.setEnabled(True)
+        nmmenu.addAction(nmConfig)
+        self._menus['mol']['nm']['config'] = nmConfig
         # Tensor visualization
         tenmenu = fileMol.addMenu('Tensors Vis.')
         tenmenu.setEnabled(False)
@@ -303,7 +342,7 @@ class TCDvis(QMainWindow):
         self._menus['vtcd']['aim'] = aimButton
         filevtcd.addAction(aimButton)
         saimButton = QAction(QIcon(''), 'Show AIM Frag Space', self)
-        saimButton.setStatusTip('Shows the volume of each fragmente in AIM partition scheme')
+        saimButton.setStatusTip('Shows the volume of each fragment in AIM partition scheme')
         saimButton.triggered.connect(self.show_aim_space)
         saimButton.setEnabled(False)
         saimButton.setCheckable(True)
@@ -363,6 +402,7 @@ class TCDvis(QMainWindow):
         self.prop.addItem('MoE')
         self.prop.addItem('EoM')
         self.prop.addItem('EoE')
+        self.prop.addItem('MoM')
         self.prop.currentIndexChanged.connect(self._enablefieldsetup)
         grid.addWidget(self.prop, 0, 1)
         self.etcdch = QPushButton('Show ETCD field', self)
@@ -404,8 +444,24 @@ class TCDvis(QMainWindow):
 
         if self._fchk is not None:
             self._enable_molmenu()
-            self._actors['mol'] =  cubetk.fillmolecule(self._fchk.atnum,
-                                                       self._fchk.crd)
+            # Determine excluded atoms if hide auto group is enabled
+            excluded_atoms = None
+            if (self._default['molconfig']['hide_auto_group'] and 
+                self._has_auto_fragment and 
+                self._fchk._frags is not None and 
+                len(self._fchk._frags) > 0):
+                excluded_atoms = self._fchk._frags[-1]  # Last fragment is auto-generated
+                
+            self._actors['mol'] =  cubetk.fillmolecule_custom(
+                self._fchk.atnum,
+                self._fchk.crd,
+                opacity=self._default['molconfig']['opacity'],
+                bond_radius=self._default['molconfig']['bond_radius'],
+                atom_radius_scale=self._default['molconfig']['atom_radius_scale'],
+                tubes_mode=self._default['molconfig']['tubes_mode'],
+                bond_tollerance=self._default['molconfig']['bond_tollerance'],
+                excluded_atoms=excluded_atoms
+            )
             self.ren.AddActor(self._actors['mol'].actor)
             self._updatenst()
             self.stline.setEnabled(True)
@@ -471,23 +527,58 @@ class TCDvis(QMainWindow):
         self._updatereder()
 
     def save_png(self):
-        #
-        pngdialog = SavePngDialog(fname=self._lastfname)
+        # Get current render window size for aspect ratio calculation
+        render_window = self.vtkWidget.GetRenderWindow()
+        current_size = render_window.GetSize()
+        figure_size = (current_size[0], current_size[1])
+        
+        pngdialog = SavePngDialog(fname=self._lastfname, figure_size=figure_size)
         pngdialog.exec()
         self._lastfname = pngdialog._fname
         if pngdialog._okexit:
-            # w2if = vtk.vtkWindowToImageFilter()
+            # Get the desired output size and DPI from dialog
+            output_width, output_height = pngdialog.get_size()
+            target_dpi = pngdialog._dpi
+            
+            # Get current render window size
+            render_window = self.vtkWidget.GetRenderWindow()
+            current_size = render_window.GetSize()
+            
+            # Calculate magnification needed to achieve target DPI
+            # VTK's default is 72 DPI, so magnification = target_dpi / 72
+            magnification = target_dpi / 72.0
+            
+            # Use vtkRenderLargeImage to properly handle DPI
             w2if = vtk.vtkRenderLargeImage()
             w2if.SetInput(self.ren)
-            w2if.SetMagnification(6)
-            # w2if.SetInputBufferTypeToRGB()
-            # w2if.ReadFrontBufferOff()
+            w2if.SetMagnification(int(magnification))
+            
+
+            # base_width = int(output_width * magnification)
+            base_width = int(output_width)
+            # base_height = int(output_height * magnification)
+            base_height = int(output_height)
+            
+            # Temporarily set render window to base size
+            original_size = render_window.GetSize()
+            render_window.SetSize(base_width, base_height)
+            render_window.Render()
+            
+            # Now render with magnification
             w2if.Update()
 
+            # Create PNG writer and set DPI information
             writer = vtk.vtkPNGWriter()
             writer.SetFileName(self._lastfname)
             writer.SetInputConnection(w2if.GetOutputPort())
+            
+            # Write the image
             writer.Write()
+                        
+            # Restore original render window size
+            render_window.SetSize(original_size[0], original_size[1])
+            render_window.Render()
+            # BUG metadata of figure are wrong
 
     def save_png_rotation(self):
         #
@@ -563,19 +654,101 @@ class TCDvis(QMainWindow):
     def _cjclose(self):
         self.close()
 
+    def _reset_interface_state(self):
+        """Reset interface state when switching between molecule types"""
+        # Reset normal mode checkboxes (only relevant for vibrational molecules)
+        if 'mol' in self._menus and 'nm' in self._menus['mol']:
+            if 'disp' in self._menus['mol']['nm']:
+                self._menus['mol']['nm']['disp'].setChecked(False)
+        
+        # Reset normal mode configuration to defaults
+        self._default['nmconfig'] = {
+            'invert_phase': False,
+            'scale_factor': 1.0,
+            'color': (0.0, 0.0, 1.0)
+        }
+        
+        # Reset transparency checkbox
+        if 'mol' in self._menus and 'transparent' in self._menus['mol']:
+            self._menus['mol']['transparent'].setChecked(False)
+        
+        # Reset TCD-related interface elements
+        self._reset_tcd_interface()
+        
+        # Reset any other interface elements that might cause conflicts
+        # between vibrational and electronic molecule types
+
+    def _reset_tcd_interface(self):
+        """Reset TCD-related interface elements to their default state"""
+        # Reset state line to default state
+        self.stline.setText("1")
+        self.stline.setEnabled(False)
+        self.stline.setStyleSheet("color: black;  background-color: white")
+        
+        # Reset TCD checkbox/control
+        self.etcdch.setEnabled(False)
+        
+        # Reset isoline control
+        self.isoline.setText(f"{self._default['isoval']['iso']:.6f}")
+        self.isoline.setEnabled(False)
+        
+        # Reset property combo box to first item
+        if hasattr(self, 'prop'):
+            self.prop.setCurrentIndex(0)
+        
+        # Disable TCD-related menu items
+        if hasattr(self, '_menus'):
+            if 'etcd' in self._menus and 'dmt' in self._menus['etcd']:
+                self._menus['etcd']['dmt'].setEnabled(False)
+            if 'vtcd' in self._menus and 'dmt' in self._menus['vtcd']:
+                self._menus['vtcd']['dmt'].setEnabled(False)
+            if 'etcddtm' in self._menus and 'frags' in self._menus['etcddtm']:
+                self._menus['etcddtm']['frags'].setEnabled(False)
+            if 'vtcddtm' in self._menus and 'frags' in self._menus['vtcddtm']:
+                self._menus['vtcddtm']['frags'].setEnabled(False)
+        
+        # Reset DTM-related elements
+        self._reset_dtm_interface()
+
+    def _reset_dtm_interface(self):
+        """Reset DTM-related interface elements to their default state"""
+        # Clear any existing DTM visualizations
+        if hasattr(self, '_actors') and 'mfpdtm' in self._actors:
+            self.ren.RemoveActor(self._actors['mfpdtm'].actor)
+            self._actors.pop('mfpdtm')
+        
+        # Disable and uncheck DTM menu items
+        if hasattr(self, '_menus'):
+            # Reset electronic DTM menus
+            if 'mol' in self._menus and 'edmt' in self._menus['mol']:
+                self._menus['mol']['edmt'].setEnabled(False)
+            if 'eledmt' in self._menus:
+                for key in self._menus['eledmt']:
+                    if key != 'menu' and hasattr(self._menus['eledmt'][key], 'setChecked'):
+                        self._menus['eledmt'][key].setChecked(False)
+            
+            # Reset vibrational DTM menus  
+            if 'mol' in self._menus and 'vibdmt' in self._menus['mol']:
+                self._menus['mol']['vibdmt'].setEnabled(False)
+            if 'vibdmt' in self._menus:
+                for key in self._menus['vibdmt']:
+                    if key != 'menu' and hasattr(self._menus['vibdmt'][key], 'setChecked'):
+                        self._menus['vibdmt'][key].setChecked(False)
+
     def _enable_molmenu(self):
         for val in self._menus['mol']:
             #print(val)
-            if not val == 'nm' and val not in 'dmt':
-                if isinstance(self._menus['mol'][val], dict):
-                    self._menus['mol'][val]['menu'].setEnabled(True)
-                else:
-                    self._menus['mol'][val].setEnabled(True)
-            elif self._moltype == 'vib':
-                self._menus['mol']['nm']['menu'].setEnabled(True)
-                self._menus['vibdmt']['menu'].setEnabled(True)
-            elif self._moltype == 'ele':
-                self._menus['eledmt']['menu'].setEnabled(True)
+            if not val == 'nm' and 'dmt' not in val:
+                self._menus['mol'][val].setEnabled(True)
+                
+        # Enable molecule-type specific menus
+        if self._moltype == 'vib':
+            self._menus['mol']['nm']['menu'].setEnabled(True)
+            self._menus['vibdmt']['menu'].setEnabled(True)
+        elif self._moltype == 'ele':
+            self._menus['eledmt']['menu'].setEnabled(True)
+            
+        # Enable TCD menus based on molecule type
         if self._moltype == 'ele':
             self._menus['etcd']['tcd'].setEnabled(True)
         elif self._moltype == 'vib':
@@ -598,6 +771,20 @@ class TCDvis(QMainWindow):
 
     def _fieldstp(self):
         current_prop = self.prop.currentText().lower()
+
+        # Compute field bounding box for clip-plane preview in setup dialogs
+        try:
+            _tcd_bnd = self._fchk.get_tcd(self._activest)
+            _orig = _tcd_bnd.loc2wrd[:3, 3]
+            _spac = np.diag(_tcd_bnd.loc2wrd[:3, :3])
+            _ends = _orig + (np.array(_tcd_bnd.npts) - 1) * _spac
+            _vtk_bounds = (
+                float(min(_orig[0], _ends[0])), float(max(_orig[0], _ends[0])),
+                float(min(_orig[1], _ends[1])), float(max(_orig[1], _ends[1])),
+                float(min(_orig[2], _ends[2])), float(max(_orig[2], _ends[2])),
+            )
+        except Exception:
+            _vtk_bounds = None
         
         if current_prop == "streamlines":
             # Handle streamlines setup dialog
@@ -610,11 +797,18 @@ class TCDvis(QMainWindow):
                                              nseeds=self._default["vfield"]["npoints"],
                                              scale=self._default["vfield"]["scalellipse"],
                                              direction=self._default["vfield"]["showdir"],
-                                             showellipse=self._default["vfield"]["showell"],
+                                             showellipse=self._default["vfield"]["showseeds"],
                                              showbar=self._default["vfield"]["showbar"],
                                              animate_particles=self._default["vfield"]["animate_particles"],
                                              num_particles=self._default["vfield"]["num_particles"],
-                                             particle_type=self._default["vfield"]["particle_type"],)
+                                             particle_type=self._default["vfield"]["particle_type"],
+                                             sampling_method=self._default["vfield"]["sampling_method"],
+                                             scalevdw=self._default["vfield"]["scalevdw"],
+                                             enable_clipping=self._default["vfield"]["enable_clipping"],
+                                             clip_bounds=self._default["vfield"]["clip_bounds"],
+                                             vtk_renderer=self.ren,
+                                             vtk_render_window=self.vtkWidget.GetRenderWindow(),
+                                             vtk_scene_bounds=_vtk_bounds)
             fieldprm.exec()
             # Update the default values
             self._default["vfield"]["vfmax"] = fieldprm._vfmax
@@ -622,15 +816,33 @@ class TCDvis(QMainWindow):
             self._default["vfield"]["mspeed"] = fieldprm._mspeed
             
             if fieldprm._recalseeds:
-                self._fchk.sample_ellipse_space(npts=fieldprm._nseeds, scale=fieldprm._scale)
+                # Remove old seeds visualization if it exists
+                if 'seeds' in self._actors:
+                    self.ren.RemoveActor(self._actors['seeds'].actor)
+                    del self._actors['seeds']
+                    
+                if fieldprm._sampling_method == "ellipsoid":
+                    self._seeds = self._fchk.sample_ellipse_space(npts=fieldprm._nseeds, scale=fieldprm._scale)
+                else:  # molecular volume
+                    current_tcd = self._fchk.get_tcd(self._activest)
+                    self._seeds = sample_molecular_volume(current_tcd, fieldprm._nseeds, scale=fieldprm._scalevdw)
+                    
+                # If show seeds is enabled, create new seeds visualization
+                if fieldprm._showellipse:
+                    self._actors['seeds'] = cubetk.draw_ellipsoid(self._seeds)
+                    self.ren.AddActor(self._actors['seeds'].actor)
             self._default["vfield"]["scalellipse"] = fieldprm._scale
+            self._default["vfield"]["scalevdw"] = fieldprm._scalevdw
+            self._default["vfield"]["sampling_method"] = fieldprm._sampling_method
             self._default["vfield"]["npoints"] = fieldprm._nseeds
             self._default["vfield"]["showdir"] = fieldprm._direction
-            self._default["vfield"]["showell"] = fieldprm._showellipse
+            self._default["vfield"]["showseeds"] = fieldprm._showellipse
             self._default["vfield"]["showbar"] = fieldprm._showbar
             self._default["vfield"]["animate_particles"] = fieldprm._animate_particles
             self._default["vfield"]["num_particles"] = fieldprm._num_particles
             self._default["vfield"]["particle_type"] = fieldprm._particle_type
+            self._default["vfield"]["enable_clipping"] = fieldprm._enable_clipping
+            self._default["vfield"]["clip_bounds"] = fieldprm._clip_bounds
             
             # Handle streamline-specific actors
             if 'tcd' in self._actors:
@@ -680,29 +892,57 @@ class TCDvis(QMainWindow):
                         del self._actors['tcdbar']
                     if fieldprm._direction and 'tcddir' not in self._actors:
                         tmp_cube = copy.deepcopy(self._fchk.get_tcd(self._activest))
-                        self._actors['tcddir'] = cubetk.draw_cones_nogrid(tmp_cube, self._fchk.samplepoints)
+                        # self._actors['tcddir'] = cubetk.draw_cones_nogrid(tmp_cube, self._seeds)
+                        self._actors['tcddir'] = cubetk.quiv3d(tmp_cube, 
+                                               scale=self._default["quiver"]["scale"]/5,
+                                               subsample_factor=100,
+                                               glyphmode='cone',
+                                               clip_bounds=self._default["vfield"]["clip_bounds"] if self._default["vfield"]["enable_clipping"] else None)
                         self.ren.AddActor(self._actors['tcddir'].actor)
                     elif 'tcddir' in self._actors:
                         self.ren.RemoveActor(self._actors['tcddir'].actor)
                         del self._actors['tcddir']
 
             if fieldprm._showellipse:
-                if self._fchk.samplepoints is None:
-                    self._fchk.sample_ellipse_space(self._default["vfield"]["npoints"], scale=self._default["vfield"]["scalellipse"])
-                self._actors['ellipse'] = cubetk.draw_ellipsoid(self._fchk.samplepoints)
-                self.ren.AddActor(self._actors['ellipse'].actor)
-            elif 'ellipse' in self._actors:
-                self.ren.RemoveActor(self._actors['ellipse'].actor)
-                del self._actors['ellipse']
+                # Remove old seeds if they exist
+                if 'seeds' in self._actors:
+                    self.ren.RemoveActor(self._actors['seeds'].actor)
+                    del self._actors['seeds']
+                    
+                # Create seeds if they don't exist or weren't created during recalc
+                if self._seeds is None:
+                    if self._default["vfield"]["sampling_method"] == "ellipsoid":
+                        self._seeds = self._fchk.sample_ellipse_space(self._default["vfield"]["npoints"], scale=self._default["vfield"]["scalellipse"])
+                    else:  # molecular volume
+                        current_tcd = self._fchk.get_tcd(self._activest)
+                        self._seeds = sample_molecular_volume(current_tcd, self._default["vfield"]["npoints"], scale=self._default["vfield"]["scalevdw"])
+                
+                # Always show the seeds regardless of sampling method
+                self._actors['seeds'] = cubetk.draw_ellipsoid(self._seeds)
+                self.ren.AddActor(self._actors['seeds'].actor)
+            elif 'seeds' in self._actors:
+                self.ren.RemoveActor(self._actors['seeds'].actor)
+                del self._actors['seeds']
                 
         elif current_prop == "quiver":
             # Handle quiver setup dialog
             quiverprm = QuiverSetupDialog(scale=self._default["quiver"]["scale"],
-                                         subsamp=self._default["quiver"]["subsample"])
+                                         subsamp=self._default["quiver"]["subsample"],
+                                         enable_clipping=self._default["quiver"]["enable_clipping"],
+                                         clip_bounds=self._default["quiver"]["clip_bounds"],
+                                         vtk_renderer=self.ren,
+                                         vtk_render_window=self.vtkWidget.GetRenderWindow(),
+                                         vtk_scene_bounds=_vtk_bounds,
+                                         lower=self._default["quiver"]["lower"],
+                                         upper=self._default["quiver"]["upper"])
             quiverprm.exec()
             # Update the default values
             self._default["quiver"]["scale"] = quiverprm._scale
             self._default["quiver"]["subsample"] = quiverprm._subsamp
+            self._default["quiver"]["enable_clipping"] = quiverprm._enable_clipping
+            self._default["quiver"]["clip_bounds"] = quiverprm._clip_bounds
+            self._default["quiver"]["lower"] = quiverprm._lower
+            self._default["quiver"]["upper"] = quiverprm._upper
             
             # Redraw quiver if it exists
             if 'tcd' in self._actors:
@@ -750,12 +990,36 @@ class TCDvis(QMainWindow):
 
         self._cleanactors()
         self._actors = {}
+        self._has_auto_fragment = False  # Reset auto-fragment flag when opening new file
+        
+        # Reset active state to first state
+        self._activest = 0
+        
+        # Reset interface state to prevent issues when switching molecule types
+        self._reset_interface_state()
+        
         # for key in self._actors:
         #     self._actors[key] = None
         self._updatenst()
         # update validator
-        self._actors['mol'] =  cubetk.fillmolecule(self._fchk.atnum,
-                                                       self._fchk.crd)
+        # Determine excluded atoms if hide auto group is enabled
+        excluded_atoms = None
+        if (self._default['molconfig']['hide_auto_group'] and 
+            self._has_auto_fragment and 
+            self._fchk._frags is not None and 
+            len(self._fchk._frags) > 0):
+            excluded_atoms = self._fchk._frags['indx'][-1]  # Last fragment is auto-generated
+            
+        self._actors['mol'] =  cubetk.fillmolecule_custom(
+            self._fchk.atnum,
+            self._fchk.crd,
+            opacity=self._default['molconfig']['opacity'],
+            bond_radius=self._default['molconfig']['bond_radius'],
+            atom_radius_scale=self._default['molconfig']['atom_radius_scale'],
+            tubes_mode=self._default['molconfig']['tubes_mode'],
+            bond_tollerance=self._default['molconfig']['bond_tollerance'],
+            excluded_atoms=excluded_atoms
+        )
         self.ren.AddActor(self._actors['mol'].actor)
         self._disable_molmenu()
         self._enable_molmenu()
@@ -773,12 +1037,18 @@ class TCDvis(QMainWindow):
             cubdata = VecCubeData(cube_parser(cub._cube))
             self._menus['etcd']["aim"].setEnabled(True)
             self._menus['etcd']['dmt'].setEnabled(True)
+            # Enable fragment contributions if AIM data and fragments are available
+            if self._fchk._aimdata is not None and self._fchk._frags is not None:
+                self._menus['etcddtm']['frags'].setEnabled(True)
         else:
             cubdata = VtcdData(cube_parser(cub._cube),
                            self._fchk._moldata['evec'][cub._vib-1],
                            self._fchk._moldata['freq'][cub._vib-1])
             self._menus['vtcd']["aim"].setEnabled(True)
             self._menus['vtcd']['dmt'].setEnabled(True)
+            # Enable fragment contributions if AIM data and fragments are available
+            if self._fchk._aimdata is not None and self._fchk._frags is not None:
+                self._menus['vtcddtm']['frags'].setEnabled(True)
         self._fchk.add_tcd(cub._vib-1, cubdata)
         self.stline.setText(f"{cub._vib}")
         self._setstate()
@@ -786,18 +1056,27 @@ class TCDvis(QMainWindow):
     def open_aim(self):
         fname = QFileDialog.getOpenFileName(self, 'Select AIM cube file', '.','*.cube')[0]
         aimcube = cube_parser(fname)
-        if aimcube.nval != 1:
+        if aimcube.nval == 1:
+            pass  # OK
+        elif aimcube.nval == 2:
+            print("Debug: Aberto's cube, only 2nd value kept for now")
+            aimcube.nval = 1
+            # Keep the second value and ensure proper 1D structure
+            aimcube.cube = aimcube.cube[1, :]
+        else:
             raise NoValidData("open_aim", "aim cube must contain a single scalar dataset")
         self._fchk.add_aim(aimcube)
         if self._fchk._frags is not None:
             if self._moltype == 'ele':
-                self._menus['etcddtm']["saim"].setEnabled(True)
+                self._menus['etcd']["saim"].setEnabled(True)
             elif self._moltype == 'vib':
-                self._menus['vtcddtm']["saim"].setEnabled(True)
+                self._menus['vtcd']["saim"].setEnabled(True)
             if self._activest in self._fchk.avail_tcd():
                 if self._moltype == 'ele':
-                    self._menus['etcddtm']['dmt'].setEnabled(True)
+                    self._menus['etcd']['dmt'].setEnabled(True)
+                    self._menus['etcddtm']['frags'].setEnabled(True)
                 elif self._moltype == 'vib':
+                    self._menus['vtcd']['dmt'].setEnabled(True)
                     self._menus['vtcddtm']['frags'].setEnabled(True)
 
     def opengroups(self):
@@ -809,16 +1088,43 @@ class TCDvis(QMainWindow):
                 natm = self._fchk.natoms
             else:
                 natm = int(jdata["molecule"]["natoms"])
+            
+            # Process fragments from JSON
             for i in jdata["molecule"]["frags"]:
                 if isinstance(i["fr_index"], str):
                     tmp = range_parse(i["fr_index"], natm, flatten=True)
                 else:
                     tmp = i['fr_index']
                 res.append([x-1 for x in tmp])
+            
+            # Check for atoms not included in any fragment
+            all_listed_atoms = set()
+            for frag in res:
+                all_listed_atoms.update(frag)
+            
+            all_atoms = set(range(natm))
+            unlisted_atoms = all_atoms - all_listed_atoms
+            
+            # Add unlisted atoms as an additional fragment if any exist
+            self._has_auto_fragment = False
+            if unlisted_atoms:
+                unlisted_list = sorted(list(unlisted_atoms))
+                res.append(unlisted_list)
+                self._has_auto_fragment = True  # Flag to track auto-created fragment
+                print(f"Added unlisted atoms to additional fragment: {[x+1 for x in unlisted_list]}")
+            
             self._fchk.set_fragment(res)
+            if self._fchk._aimdata is not None:
+                if self._moltype == 'ele':
+                    self._menus['etcd']['saim'].setEnabled(True)
+                elif self._moltype == 'vib':
+                    self._menus['vtcd']['saim'].setEnabled(True)
             if (self._fchk._aimdata is not None and 
-                self._activenm in self._fchk.avail_tcd()):
-                self._menus['vtcddtm']['frags'].setEnabled(True)
+                self._activest in self._fchk.avail_tcd()):
+                if self._moltype == 'ele':
+                    self._menus['etcddtm']['frags'].setEnabled(True)
+                elif self._moltype == 'vib':
+                    self._menus['vtcddtm']['frags'].setEnabled(True)
 
             # FIXME
             # self.__color = random_colors(len(res))
@@ -872,8 +1178,14 @@ class TCDvis(QMainWindow):
             self.isoline.setEnabled(True)
             if self._moltype == 'ele':
                 self._menus['etcd']['dmt'].setEnabled(True)
+                # Enable fragment contributions if AIM data and fragments are available
+                if self._fchk._aimdata is not None and self._fchk._frags is not None:
+                    self._menus['etcddtm']['frags'].setEnabled(True)
             elif self._moltype == 'vib':
                 self._menus['vtcd']['dmt'].setEnabled(True)
+                # Enable fragment contributions if AIM data and fragments are available
+                if self._fchk._aimdata is not None and self._fchk._frags is not None:
+                    self._menus['vtcddtm']['frags'].setEnabled(True)
         else:
             self.stline.setStyleSheet("color: black;  background-color: white")
             self.etcdch.setEnabled(False)
@@ -889,8 +1201,8 @@ class TCDvis(QMainWindow):
         if 'tcddtm' in self._actors:
             self.showtcdmt()
         
-        # Refresh NM visualization if it's currently displayed
-        if self._menus['mol']['nm']['disp'].isChecked():
+        # Refresh NM visualization if it's currently displayed (only for vibrational molecules)
+        if self._moltype == 'vib' and self._menus['mol']['nm']['disp'].isChecked():
             self.shownm()
 
     def showdmt(self):
@@ -1146,18 +1458,32 @@ class TCDvis(QMainWindow):
         tmp_iso = [-self._default['isoval']['iso'],
                    self._default['isoval']['iso']]
         if prop_cur == "streamlines":
-            if self._fchk.samplepoints is None:
-                self._fchk.sample_ellipse_space(self._default["vfield"]["npoints"], scale=self._default["vfield"]["scalellipse"])
+            if self._seeds is None:
+                if self._default["vfield"]["sampling_method"] == "ellipsoid":
+                    self._seeds = self._fchk.sample_ellipse_space(self._default["vfield"]["npoints"], scale=self._default["vfield"]["scalellipse"])
+                else:  # molecular volume
+                    current_tcd = self._fchk.get_tcd(self._activest)
+                    self._seeds = sample_molecular_volume(current_tcd, self._default["vfield"]["npoints"], scale=self._default["vfield"]["scalevdw"])
             tmp_cube.loc2wrd *=  PHYSFACT.bohr2ang
             self._actors['tcd'] =  cubetk.fillstreamline(tmp_cube,
                                                          clipping=(self._default["vfield"]["vfmax"],
                                                                     self._default["vfield"]["vfmin"]),
                                                          minspeed=self._default["vfield"]["mspeed"],
-                                                         seeds=self._fchk.samplepoints)
+                                                         seeds=self._seeds,
+                                                         clip_bounds=self._default["vfield"]["clip_bounds"] if self._default["vfield"]["enable_clipping"] else None)
             if self._default["vfield"]["showbar"]:
                 self._actors['tcdbar'] = cubetk.draw_colorbar(self._actors['tcd'].actor, "Norm(J)")
             if self._default["vfield"]["showdir"]:
-                self._actors['tcddir'] = cubetk.draw_cones_nogrid(tmp_cube, self._fchk.samplepoints)
+                # attempt to draw direction with cones.
+                # instead of using the seeds points, 
+                # we can show hedehogs with cone gliphs
+                # and a sparse sampling of the vector field
+                # self._actors['tcddir'] = cubetk.draw_cones_nogrid(tmp_cube, self._seeds)
+                self._actors['tcddir'] = cubetk.quiv3d(tmp_cube, 
+                                               scale=self._default["quiver"]["scale"]/5,
+                                               subsample_factor=100,
+                                               glyphmode='cone',
+                                               clip_bounds=self._default["vfield"]["clip_bounds"] if self._default["vfield"]["enable_clipping"] else None)
             
             # Add animated particles if enabled
             if self._default["vfield"]["animate_particles"]:
@@ -1178,9 +1504,12 @@ class TCDvis(QMainWindow):
             mask_index = filtervecatom(tmp_cube, 0.3)
             tmp_cube.cube[:, mask_index] = 0
             tmp_cube.loc2wrd *=  PHYSFACT.bohr2ang
-            self._actors['tcd'] = cubetk.quiv3d(tmp_cube, 
+            self._actors['tcd'] = cubetk.quiv3d(tmp_cube,
+                                               lower=self._default["quiver"]["lower"],
+                                               upper=self._default["quiver"]["upper"],
                                                scale=self._default["quiver"]["scale"],
-                                               subsample_factor=self._default["quiver"]["subsample"])
+                                               subsample_factor=self._default["quiver"]["subsample"],
+                                               clip_bounds=self._default["quiver"]["clip_bounds"] if self._default["quiver"]["enable_clipping"] else None)
         elif prop_cur == "moe":
             if self._moltype == 'ele':
                 vec = tmp_cube.integrate() / self._fchk.get_exeng(self._activest)
@@ -1220,7 +1549,8 @@ class TCDvis(QMainWindow):
             else:
                 tmp_cube = tmp_cube.proj_on_vec("eoe", nucl=False, cube=True)
             tmp_cube.loc2wrd *=  PHYSFACT.bohr2ang
-            tmp_cube.cube /= self._fchk.get_transeng(self._activest)
+            if self._moltype == 'ele':
+                tmp_cube.cube /= self._fchk.get_transeng(self._activest)
             tmp_cube.cube /= PHYSFACT.bohr2ang**3
             self._actors['tcd'] = cubetk.countur(tmp_cube, tmp_iso)
             if DEBUG:
@@ -1229,6 +1559,22 @@ class TCDvis(QMainWindow):
                 print(f"From Vec cube: {np.dot(tmp[0], tmp[0]):.5f}")
                 tmp = self._fchk.get_dtm(self._activest, cgs=False)
                 print(f"From FCHK: {np.dot(tmp[0], tmp[0]):.5f}")
+        elif prop_cur == "mom":
+            if self._moltype == 'ele':
+                vec = tmp_cube.rotorintegrate()
+                tmp_cube = tmp_cube.proj_on_vec(vec=vec, rot=True, cube=True)
+                # tmp_cube.cube /= self._fchk.get_exeng(self._activest)
+            else:
+                tmp_cube = tmp_cube.proj_on_vec("mom", nucl=False, cube=True)
+            tmp_cube.loc2wrd *=  PHYSFACT.bohr2ang
+            tmp_cube.cube /= PHYSFACT.bohr2ang**3
+            self._actors['tcd'] = cubetk.countur(tmp_cube, tmp_iso)
+            if DEBUG:
+                print(f"Integrated scalar: {tmp_cube.integrate():.5f}" )
+                tmp = self._fchk.get_tcd_dtm(self._activest, cgs=False)
+                print(f"From Vec cube: {np.dot(tmp[1], tmp[1]):.5f}")
+                tmp = self._fchk.get_dtm(self._activest, cgs=False)
+                print(f"From FCHK: {np.dot(tmp[1], tmp[1]):.5f}")
 
         self.ren.AddActor(self._actors['tcd'].actor)
         if 'tcdbar' in self._actors:
@@ -1236,37 +1582,154 @@ class TCDvis(QMainWindow):
         if 'tcddir' in self._actors:
             self.ren.AddActor(self._actors['tcddir'].actor)
         
-        # Refresh DTM vectors if they were previously displayed
-        if 'mfpdtm' in self._actors:
-            self.showdmt()
-        if 'tcddtm' in self._actors:
-            self.showtcdmt()
-        
         self._updatereder()
+
+    def configure_nm(self):
+        """Open dialog to configure normal mode display options"""
+        config_dialog = NMConfigDialog(
+            parent=self,
+            invert_phase=self._default['nmconfig']['invert_phase'],
+            scale_factor=self._default['nmconfig']['scale_factor'],
+            color=self._default['nmconfig']['color']
+        )
+        
+        config_dialog.exec()
+        
+        if config_dialog._okexit:
+            # Update configuration
+            self._default['nmconfig']['invert_phase'] = config_dialog._invert_phase
+            self._default['nmconfig']['scale_factor'] = config_dialog._scale_factor
+            self._default['nmconfig']['color'] = config_dialog._color
+            
+            # Refresh display if NM is currently shown
+            if self._menus['mol']['nm']['disp'].isChecked():
+                self.shownm()
+
+    def configure_molecule(self):
+        """Open dialog to configure molecule display settings"""
+        config_dialog = MoleculeConfigDialog(
+            parent=self,
+            wireframe=self._default['molconfig']['wireframe'],
+            opacity=self._default['molconfig']['opacity'],
+            bond_radius=self._default['molconfig']['bond_radius'],
+            atom_radius_scale=self._default['molconfig']['atom_radius_scale'],
+            tubes_mode=self._default['molconfig']['tubes_mode'],
+            bond_tollerance=self._default['molconfig']['bond_tollerance'],
+            hide_auto_group=self._default['molconfig']['hide_auto_group'],
+            has_auto_fragment=self._has_auto_fragment and self._fchk._frags is not None
+        )
+        
+        config_dialog.exec()
+        
+        if config_dialog._okexit:
+            # Update configuration
+            self._default['molconfig']['wireframe'] = config_dialog._wireframe
+            self._default['molconfig']['opacity'] = config_dialog._opacity
+            self._default['molconfig']['bond_radius'] = config_dialog._bond_radius
+            self._default['molconfig']['atom_radius_scale'] = config_dialog._atom_radius_scale
+            self._default['molconfig']['tubes_mode'] = config_dialog._tubes_mode
+            self._default['molconfig']['bond_tollerance'] = config_dialog._bond_tollerance
+            self._default['molconfig']['hide_auto_group'] = config_dialog._hide_auto_group
+            
+            # Refresh molecule display
+            self._refresh_molecule_display()
+
+    def _refresh_molecule_display(self):
+        """Refresh the molecule display with current settings"""
+        if 'mol' in self._actors:
+            # Remove current molecule
+            self.ren.RemoveActor(self._actors['mol'].actor)
+            
+            # Determine excluded atoms if hide auto group is enabled
+            excluded_atoms = None
+            if (self._default['molconfig']['hide_auto_group'] and 
+                self._has_auto_fragment and 
+                self._fchk._frags is not None and 
+                len(self._fchk._frags) > 0):
+                excluded_atoms = self._fchk._frags['indx'][-1]  # Last fragment is auto-generated
+            
+            # Create new molecule with updated settings
+            self._actors['mol'] = cubetk.fillmolecule_custom(
+                self._fchk.atnum,
+                self._fchk.crd,
+                opacity=self._default['molconfig']['opacity'],
+                bond_radius=self._default['molconfig']['bond_radius'],
+                atom_radius_scale=self._default['molconfig']['atom_radius_scale'],
+                tubes_mode=self._default['molconfig']['tubes_mode'],
+                bond_tollerance=self._default['molconfig']['bond_tollerance'],
+                excluded_atoms=excluded_atoms
+            )
+            
+            # Add updated molecule to renderer
+            self.ren.AddActor(self._actors['mol'].actor)
+            self._updatereder()
 
     def shownm(self):
         if 'nm' in self._actors:
             self.ren.RemoveActor(self._actors['nm'].actor)
             del self._actors['nm']
         if self._menus['mol']['nm']['disp'].isChecked():
-            mul = 1
-            if self._menus['mol']['nm']['revert'].isChecked():
-                mul = -1
-            self._actors['nm'] = cubetk.draw_nm3d(self._fchk.crd,
-                                                  self._fchk.get_evec(self._activest)*mul,
-                                                  self._fchk.atnum)
+            # Apply configuration settings
+            phase_mult = -1 if self._default['nmconfig']['invert_phase'] else 1
+            scale = self._default['nmconfig']['scale_factor']
+            color = self._default['nmconfig']['color']
+            
+            self._actors['nm'] = cubetk.draw_nm3d(
+                self._fchk.crd,
+                self._fchk.get_evec(self._activest) * phase_mult,
+                self._fchk.atnum,
+                scale=scale,
+                color=color
+            )
             self.ren.AddActor(self._actors['nm'].actor)
         self._updatereder()
 
+    def toggle_mol_transparency(self):
+        """Toggle molecule transparency between opaque and semi-transparent"""
+        if 'mol' in self._actors:
+            is_transparent = self._menus['mol']['transparent'].isChecked()
+            alpha = 0.3 if is_transparent else 1.0
+            
+            # Apply transparency to all parts of the molecule
+            mol_actor = self._actors['mol'].actor
+            mol_actor.GetProperty().SetOpacity(alpha)
+            
+            # If there are multiple components (atoms, bonds, etc.), apply to all
+            if hasattr(self._actors['mol'], 'sphere_actors'):
+                for sphere_actor in self._actors['mol'].sphere_actors:
+                    sphere_actor.GetProperty().SetOpacity(alpha)
+            
+            if hasattr(self._actors['mol'], 'cylinder_actors'):
+                for cyl_actor in self._actors['mol'].cylinder_actors:
+                    cyl_actor.GetProperty().SetOpacity(alpha)
+                    
+            self._updatereder()
+
     # AIM functions
     def show_aim_space(self):
-        if self._menus['vtcd']['saim'].isChecked():
+        # Check the correct menu based on molecule type
+        saim_checked = False
+        if self._moltype == 'ele':
+            saim_checked = self._menus['etcd']['saim'].isChecked()
+        elif self._moltype == 'vib':
+            saim_checked = self._menus['vtcd']['saim'].isChecked()
+            
+        if saim_checked:
             ind = self._fchk.avail_tcd()[0]
             tmp_cube = self._fchk.get_tcd(ind).get_frag_isosurf()
-            tmp_cube.loc2wrd *=  PHYSFACT.bohr2ang 
+            _mask = vdw_boolean_mask(tmp_cube, thresh=1)
+            tmp_cube.loc2wrd *=  PHYSFACT.bohr2ang
+            tmp_cube.cube = np.where(_mask, tmp_cube.cube, -1e10)  # Mask out values outside the vdW surface
             colors = self._fchk.get_frag_colors()
             grids = cubetk.fillcubeimage(tmp_cube, vec=False, aslist=True)
-            for i, grd in enumerate(grids):
+            
+            # Determine how many fragments to display (skip auto-generated fragment if it exists)
+            num_fragments = len(grids)
+            if self._has_auto_fragment:
+                num_fragments -= 1  # Skip the last fragment (auto-generated for missing atoms)
+            
+            for i in range(num_fragments):
+                grd = grids[i]
                 isoactor = cubetk._countur(grd, [1],
                                          active="scalar",
                                          colors=[colors[i]],
@@ -1274,10 +1737,81 @@ class TCDvis(QMainWindow):
                 self.ren.AddActor(isoactor.actor)
                 self._actors[f"aimiso{i:d}"] = isoactor
         else:
-            if "aimiso0" in self._actors:
-                for i in range(self._fchk.nfrags):
-                    self.ren.RemoveActor(self._actors[f"aimiso{i:d}"].actor)
+            # Remove all existing AIM isosurfaces
+            aimiso_keys = [key for key in self._actors.keys() if key.startswith("aimiso")]
+            for key in aimiso_keys:
+                self.ren.RemoveActor(self._actors[key].actor)
+                del self._actors[key]
         self._updatereder()
+
+    def open_scene(self):
+        fname = QFileDialog.getOpenFileName(self, 'Select VTK Scene file',
+                                            '.','*.json')[0]
+        jsonfile = os.path.basename(fname)
+        try:
+            scene = read_json(fname)
+            camera = self.ren.GetActiveCamera()
+            camera.SetPosition(scene['Camera:Position'])
+            camera.SetFocalPoint(scene['Camera:FocalPoint'])
+            camera.SetViewUp(scene['Camera:ViewUp'])
+            camera.SetViewAngle(scene['Camera:ViewAngle'])
+            camera.SetClippingRange(scene['Camera:ClippingRange'])
+            self.iren.Start()
+            self._default = scene['Used parameters']
+            # print("NYI")
+        except FileNotFoundError as err:
+            print(err)
+        except KeyError:
+            print(f"{jsonfile} not a VTK scene")
+        
+    def save_scene(self):
+        jsondialog = SaveSceneDialog()
+        jsondialog.exec()
+        fname = jsondialog._fname
+        camera = self.ren.GetActiveCamera()
+        res = {}
+        res['Camera:FocalPoint'] = camera.GetFocalPoint()
+        res['Camera:Position'] = camera.GetPosition()
+        res['Camera:ViewUp'] = camera.GetViewUp()
+        res['Camera:ViewAngle'] = camera.GetViewAngle()
+        res['Camera:ClippingRange'] = camera.GetClippingRange()
+        res['Used parameters'] = self._default
+        write_json(res, fname)
+
+    def export_scene_pov(self):
+        dlg = ExportPOVDialog(parent=self)
+        if dlg.exec() == ExportPOVDialog.Accepted:
+            if dlg.export(self.vtkWidget.GetRenderWindow()):
+                if 'mol' in self._actors:
+                    write_molecule_pov(self._actors['mol'], dlg._fname)
+
+    def _batch_operations(self):
+        """Performs batch operations on multiple files using a configuration JSON file.
+        This function open the JSON file via a file dialog, reads the file and performs the operations.
+        The structure of the JSON is:
+        {
+            "systems":[
+            {
+                "fname": "prefix_fname",
+                "fchk": "path_to_fchk",
+                "cubes":{"#nstate": "path_to_cube"},
+                "aim": "path_to_aim_cube",
+                "groups": "path_to_groups_json",
+            }
+            ],
+            "operations":[{
+                "type": "operation_type", # e.g. streamlines, quiver, moe, eom, eoe
+                "show_dmt": true/false,
+                "show_nm": true/false,
+                "image_size": [width, height],
+                "dpi": 300,
+                "output_dir": "path_to_output_directory"
+                }
+            ],
+            "settings": "path_to_settings_json"
+        }
+        """
+        pass
 
 
 def main():

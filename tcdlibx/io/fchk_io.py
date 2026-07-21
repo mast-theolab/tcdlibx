@@ -31,7 +31,7 @@ def fchk_vib_parser(fname):
     #name = os.path.split(fname)[-1][:-5]
     data = {}
     qtt = len(keys)
-    with open(fname, 'r') as fopen:
+    with open(fname, 'r', encoding='utf-8') as fopen:
         deriv = 'num derivs'
         line = fopen.readline()
         while line:
@@ -118,7 +118,7 @@ def get_anha_nm(fname):
     quick function with no checks to get the
     anharm normal modes from fchk file if presente
     """
-    with open(fname, 'r') as fchk_file:
+    with open(fname, 'r', encoding='utf-8') as fchk_file:
         for _ in range(3):
             line = fchk_file.readline()
             if not line:
@@ -157,7 +157,7 @@ def get_nac(fname, vstate=None):
             print('ERROR: vibrational state definition not supported with fchk')
             return False
         else:
-            with open(fname, 'r') as fobj:
+            with open(fname, 'r', encoding='utf-8') as fobj:
                 line = fobj.readline()
                 while not line.startswith('Nonadiabatic coupling'):
                     line = fobj.readline()
@@ -172,7 +172,7 @@ def get_nac(fname, vstate=None):
                     data.extend([float(item) for item in line.split()])
     elif ext in ('log', 'out'):
         if vstate is None:
-            with open(fname, 'r') as fobj:
+            with open(fname, 'r', encoding='utf-8') as fobj:
                 line = fobj.readline()
                 while 'Nonadiabatic Coup.' not in line:
                     line = fobj.readline()
@@ -188,7 +188,7 @@ def get_nac(fname, vstate=None):
         else:
             txt = '\\s+'.join(vstate)+'\\s+'
             key = re.compile(r'^\s+'+txt.replace('(', '\\(').replace(')', '\\)')+r'-?\d+\.')
-            with open(fname, 'r') as fobj:
+            with open(fname, 'r', encoding='utf-8') as fobj:
                 line = fobj.readline()
                 while 'Anharmonic Transition Moments' not in line:
                     line = fobj.readline()
@@ -236,7 +236,7 @@ def get_transition_energy(fname):
     reads from the fchk file the SCF Energy and the total energy
     returns the transition energy as: Etot-E0
     """
-    with open(fname, 'r') as fopen:
+    with open(fname, 'r', encoding='utf-8') as fopen:
         line = fopen.readline()
         while not line.startswith('SCF Energy'):
             line = fopen.readline()

@@ -2,9 +2,9 @@ import random
 import numpy as np
 import typing as tp
 from estampes.data.atom import atomic_data
-from tcdlibx.utils.mol_data import ELEMENTS
-
-# from estampes.tools.atom import convert_labsymb
+from estampes.tools.atom import convert_labsymb
+# from estampes.visual.povrender import build_box, set_cam_depth, write_pov_head, write_pov_mol
+from estampes.visual.povrender import write_pov_mol, MAT_PLASTIC, MAT_GLASS, MAT_METAL
 from estampes.data.physics import PHYSFACT, phys_fact
 from tcdlibx.utils.var_tools import getellipsoid
 from tcdlibx.calc.cube_manip import AimCubeData, CubeData, VecCubeData, VtcdData
@@ -22,7 +22,7 @@ def random_colors(ncolors: int) -> list[list[float]]:
     return color
 
 
-def filtervecatom(cubefile: CubeData, thresh: float = 0.15) -> list[int]:
+def filtervecatom(cubefile: CubeData, thresh: float = 0.1) -> list[int]:
     """Returns the indices of voxels too close to the atomic centre
     defined as closer to thresh(default=0.15)*vdw radius in bohr
 
@@ -31,12 +31,91 @@ def filtervecatom(cubefile: CubeData, thresh: float = 0.15) -> list[int]:
         thresh (float, optional): _description_. Defaults to 0.15.
     """
     res = []
-    radii = [atomic_data(int(x))[int(x)]['rvdw']/PHYSFACT.bohr2ang*thresh for x in cubefile.ian]
+    radii = [atomic_data(int(x))[int(x)]['rvdw']['alvarez13']/PHYSFACT.bohr2ang*thresh for x in cubefile.ian]
     for i in range(cubefile.crd.shape[0]):
         tmp_index = cubefile.indexinsphere(cubefile.crd[i], radii[i]).tolist()
         if tmp_index:
             res.extend(tmp_index)
     return list(set(res))
+
+
+def molecular_voxels(cubefile: CubeData, maxthresh: float = 1.5, minthresh: float = .3) -> list[int]:
+    """Returns the indices of the grid points within 
+
+    Args:
+        cubefile (CubeData): _description_
+        maxthresh (float, optional): _description_. Defaults to 1.
+        minthresh (float, optional): _description_. Defaults to .15.
+
+    Returns:
+        list[int]: _description_
+    """
+    res = []
+    radii = [atomic_data(int(x))[int(x)]['rvdw']['alvarez13']/PHYSFACT.bohr2ang for x in cubefile.ian]
+    for i in range(cubefile.crd.shape[0]):
+        tmp_index_all = cubefile.indexinsphere(cubefile.crd[i], radii[i]*maxthresh).tolist()
+        tmp_index_inner = cubefile.indexinsphere(cubefile.crd[i],
+                                           radii[i]*minthresh).tolist()
+        tmp_index = list(set(tmp_index_all) - set(tmp_index_inner))
+        if tmp_index:
+            res.extend(tmp_index)
+    return list(set(res))
+
+def vdw_boolean_mask(cubefile: CubeData, thresh: float = 1.0) -> np.ndarray:
+    """Returns a boolean array with True for voxels inside the VDW surface
+    and False outside.
+
+    Args:
+        cubefile (CubeData): cube data object containing atomic positions and grid.
+        thresh (float, optional): scaling factor applied to the VDW radius.
+            Values > 1 expand the surface, < 1 shrink it. Defaults to 1.0.
+
+    Returns:
+        np.ndarray: boolean array of shape (npts[0]*npts[1]*npts[2],),
+            True inside the VDW surface of any atom, False outside.
+    """
+    if not cubefile.box.size:
+        cubefile.make_box()
+    ntotal = cubefile.npts[0] * cubefile.npts[1] * cubefile.npts[2]
+    mask = np.zeros(ntotal, dtype=bool)
+    radii = [atomic_data(int(x))[int(x)]['rvdw']['alvarez13'] / PHYSFACT.bohr2ang * thresh
+             for x in cubefile.ian]
+    # print(radii)
+    for i in range(cubefile.crd.shape[0]):
+        indices = cubefile.indexinsphere(cubefile.crd[i], radii[i])
+        if indices.size:
+            mask[indices] = True
+    return mask
+
+
+def sample_molecular_volume(cubefile: CubeData, npoints: int, scale: float = 1.5) -> np.ndarray:
+    """Sample points within the molecular volume defined by the VDW radii
+
+    Args:
+        cubefile (CubeData): _description_
+        npoints (int): _description_
+        scale (float, optional): _description_. Defaults to 1..
+
+    Returns:
+        np.ndarray: _description_
+    """
+    mol_voxel_indices = molecular_voxels(cubefile, maxthresh=scale, minthresh=0.1*scale)
+    mol_voxel_indices = np.array(mol_voxel_indices, dtype=int)
+    
+    if mol_voxel_indices.shape[0] > npoints:
+        selindx = np.random.choice(mol_voxel_indices.shape[0], npoints, replace=False)
+        selected_indices = mol_voxel_indices[selindx]
+    else:
+        selected_indices = mol_voxel_indices
+    
+    if not cubefile.box.size:
+        cubefile.make_box()
+    
+    selected_coords = cubefile.box[:, selected_indices].T
+    
+    return selected_coords * PHYSFACT.bohr2ang  # Convert to Angstroms
+
+
 
 def nuclear_tensors(atnums: np.ndarray, atcrds: np.ndarray) -> dict[str, np.ndarray]:
     natoms = atnums.shape[0]
@@ -142,6 +221,7 @@ class Molecule():
         self._samplepoints = getellipsoid(self._moldata['atcrd'][mask, :],
                                           np.array(self._moldata['atnum'])[mask],
                                           npts, scale)
+        return self._samplepoints
             
 
 class VibMolecule(Molecule):
@@ -203,6 +283,8 @@ class VibMolecule(Molecule):
                    np.einsum("j,jk->k", self._moldata['lx'][vib], self._moldata['aatnuc']))
         else:
             raise NoValidData("Molecule.get_dtm", 'No valid dtm type: tot, ele, nuc')
+        # print(np.einsum("j,jk->k", self._moldata['lx'][vib], self._moldata['aptnuc']))
+        # print(np.einsum("j,jk->k", self._moldata['lx'][vib], self._moldata['aatnuc']))
         if cgs:
             res = (edip_cgs(res[0], self.get_freq(vib)),
                    mdip_cgs(res[1], self.get_freq(vib))) 
@@ -378,6 +460,7 @@ class EleMolecule(Molecule):
         if state > self._nstates -1  or state < 0:
             raise NoValidData("EleMolecule.get_vtcd_dtm", "State out of range")
         if tps == "tot":
+            # -1 * -1 tcd should have - to give the velocity form, but the conversion to length already has a -1 factor, so they cancel out
             res = (self._etcd[state].integrate() / self._moldata['exeng'][state], # to length
                    self._etcd[state].rotorintegrate()/2)
         elif tps == "frags":
@@ -469,7 +552,7 @@ class MyvtkActor():
         """Get the center of the actor"""
         return self._actor.GetCenter()
 
-def fibonacci_spiral_samples_on_unit_sphere(nb_samples, mode=0):
+def fibonacci_spiral_samples_on_unit_sphere(nb_samples: int, mode: int = 0) -> np.ndarray:
     """
     Generate points on a unit sphere using Fibonacci spiral sampling.
     Taken from:
@@ -499,83 +582,85 @@ def fibonacci_spiral_samples_on_unit_sphere(nb_samples, mode=0):
         j += 1
     return ss
 
+def write_molecule_pov(mol_myvtkactor: 'MyvtkActor', filename: str) -> None:
+    """Append the molecular information to an existing POV-Ray file using estampes.
 
-def compute_atom_mask(mol_data,
-                        atom_filter: tp.Optional[tp.List[str]] = None,
-                        frag_filter: tp.Optional[tp.List[int]] = None) -> np.ndarray:
-    """
-    Build a boolean atom mask combining an atomic symbol filter and a
-    fragment index filter. When both are provided, the resulting mask is
-    the intersection (AND) of the two: an atom is selected if it matches
-    the symbol filter AND belongs to one of the selected fragments.
+    Atom positions and types are read from the VTK actor to match the scene
+    orientation. Bonds that were excluded (order 0) are also skipped.
 
     Args:
-        mol_data: Molecule-like object exposing 'atnum' and, when frag_filter
-            is used, 'get_frag_indx()'
-        atom_filter (list): List of atomic symbols to filter (e.g., ['C', 'N', 'O'])
-        frag_filter (list): List of fragment indices (0-based) to filter
+        mol_myvtkactor: MyvtkActor returned by fillmolecule / fillmolecule_custom.
+        filename: Path to the VTK scene .pov file; 
+    """
 
-    Returns:
-        np.ndarray: Boolean mask of shape (natoms,)
-    """   
+    vtk_mol = mol_myvtkactor.actor.GetMapper().GetInput()  # vtkMolecule
+    n_atoms = vtk_mol.GetNumberOfAtoms()
+    n_bonds = vtk_mol.GetNumberOfBonds()
 
-    atomic_numbers = mol_data.atnum
-    natoms = len(atomic_numbers)
+    atnums = []
+    positions = []
+    for i in range(n_atoms):
+        atom = vtk_mol.GetAtom(i)
+        atnums.append(int(atom.GetAtomicNumber()))
+        pos = atom.GetPosition()
+        positions.append([pos[0], pos[1], pos[2]])
 
-    if atom_filter is not None:
-        filter_atomic_numbers = []
-        for symbol in atom_filter:
-            try:
-                filter_atomic_numbers.append(ELEMENTS.index(symbol))
-            except ValueError:
-                raise ValueError(f"Unknown atomic symbol: {symbol}")
-        symbol_mask = np.isin(atomic_numbers, filter_atomic_numbers)
-    else:
-        symbol_mask = np.ones(natoms, dtype=bool)
+    at_lab = convert_labsymb(True, *atnums)
+    at_crd = np.array(positions) # * PHYSFACT.bohr2ang
 
-    if frag_filter is not None:
-        frag_indx = mol_data.get_frag_indx()
-        frag_mask = np.zeros(natoms, dtype=bool)
-        for frag_id in frag_filter:
-            if frag_id < 0 or frag_id >= len(frag_indx):
-                raise ValueError(f"Fragment index out of range: {frag_id}")
-            for atom_idx in frag_indx[frag_id]:
-                frag_mask[atom_idx] = True
-    else:
-        frag_mask = np.ones(natoms, dtype=bool)
+    bonds = []
+    for i in range(n_bonds):
+        if vtk_mol.GetBondOrder(i) == 0:
+            continue
+        bond = vtk_mol.GetBond(i)
+        bonds.append((bond.GetBeginAtomId(), bond.GetEndAtomId()))
 
-    atom_mask = symbol_mask & frag_mask
+    # estampes write_pov_mol internally writes <col0, col2, col1>
+    # to convert right-handed chemistry to POV-Ray's left-handed system.
+    # Pre-swap Y Z here so the swap cancels out, preserving the original
+    # VTK orientation (molecular Y up, molecular Z as depth).
+    at_crd_ps = at_crd[:, [0, 2, 1]]
 
-    if not atom_mask.any():
-        raise ValueError(
-            f"No atoms found matching the filter: atom_filter={atom_filter}, frag_filter={frag_filter}"
-        )
-    return atom_mask
+    # box = build_box(at_lab, at_crd_ps)
+    # cam_depth = set_cam_depth(box)
 
-DEFAULT_VIS_VALS = {'isoval': {'iso': 0.01},
+    with open(filename, 'a', encoding='utf-8') as fobj:
+        fobj.write(MAT_PLASTIC)
+        fobj.write(MAT_GLASS)
+        fobj.write(MAT_METAL)
+        write_pov_mol(fobj, 1, at_lab, at_crd_ps, bonds, col_bond_as_atom=True)
+
+
+DEFAULT_PARAMETERS = {'isoval': {'iso': 0.01},
                          'vfield': {'vfmax': 1e2,
                                     'vfmin': 1e5,
                                     'mspeed': None,
                                     'npoints': 100,
                                     'scalellipse': 3.,
+                                    'scalevdw': 2.0,
+                                    'sampling_method': 'ellipsoid',
                                     'showdir': False,
-                                    'showell': False,
+                                    'showseeds': False,
                                     'conescale': .1,
                                     'showbar': False,
                                     'animate_particles': False,
                                     'num_particles': 15,
-                                    'particle_type': 'sphere'},
+                                    'particle_type': 'sphere',
+                                    'enable_clipping': False,
+                                    'clip_bounds': {}},
                          'quiver': {'scale': 100,
-                                   'subsample': 5},
-                         'tensor': {'sphere_radius': 0.5,
-                                    'nb_sphere_samples': 50,
-                                    'nb_sphere_surface': 250,
-                                    'vector_scale': 1.0,
-                                    'surface_scale': 1.0,
-                                    'opacity': 0.8,
-                                    'color_scheme': 'weight_mag',
-                                    'surf_color_scheme': 'magnitude',
-                                    'atom_filter': None,
-                                    'frag_filter': None,
-                                    'show_spheres': False,
-                                    'tensor_level': 'tot'}}
+                                   'subsample': 5,
+                                   'lower': 0.0001,
+                                   'upper': 0.01,
+                                   'enable_clipping': False,
+                                   'clip_bounds': {}},
+                         'nmconfig': {'invert_phase': False,
+                                     'scale_factor': 1.0,
+                                     'color': (0.0, 0.0, 1.0)},
+                         'molconfig': {'wireframe': False,
+                                      'opacity': 1.0,
+                                      'bond_radius': 0.03,
+                                      'atom_radius_scale': 0.1,
+                                      'tubes_mode': False,
+                                      'bond_tollerance': 0.23,
+                                      'hide_auto_group': False},}

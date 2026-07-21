@@ -67,6 +67,16 @@ def import_vtk():
                             for module in self._modules:
                                 if hasattr(module, name):
                                     return getattr(module, name)
+                            
+                            # Try additional VTK modules for common classes
+                            if name == 'vtkTransform':
+                                try:
+                                    import vtkmodules.vtkCommonTransforms as transforms
+                                    if hasattr(transforms, name):
+                                        return getattr(transforms, name)
+                                except ImportError:
+                                    pass
+                            
                             raise AttributeError(f"VTK has no attribute '{name}'")
                     
                     return VTKMinimal()

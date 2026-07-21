@@ -4,7 +4,6 @@ VTK objects
 """
 # import sys
 # import os
-import typing as tp
 import numpy as np
 
 # Import VTK with error handling
@@ -575,11 +574,11 @@ def dots2vtkarray(dots: np.ndarray) -> vtk.vtkPolyData:
     pointPolyData1.SetPoints(points1)
     return pointPolyData1
 
-def create_vector_field_polydata(positions: np.ndarray, 
-                                vectors: np.ndarray,
-                                scalars: tp.Optional[np.ndarray] = None,
-                                vector_name: str = 'vectors',
-                                scalar_name: str = 'scalars') -> vtk.vtkPolyData:
+def create_vector_field_polydata(positions: np.ndarray,
+                                 vectors: np.ndarray,
+                                 scalars: np.ndarray | None = None,
+                                 vector_name: str = 'vectors',
+                                 scalar_name: str = 'scalars') -> vtk.vtkPolyData:
     """
     Create a vtkPolyData with vectors at specified positions in space.
     
@@ -640,7 +639,174 @@ def create_vector_field_polydata(positions: np.ndarray,
     return polydata
 
 
-def fillcubeimage(data, vec=True, logscale=False, aslist=False):
+def apply_spatial_clipping(grid_data: vtk.vtkImageData,
+                           clip_bounds: dict[str, float | None]) -> vtk.vtkImageData:
+    """
+    Apply spatial clipping to VTK ImageData using coordinate bounds.
+    
+    Args:
+        grid_data: Input VTK ImageData to clip
+        clip_bounds: Dictionary with coordinate bounds, e.g.:
+                    {'xmin': -5.0, 'xmax': 5.0, 'ymin': None, 'ymax': 3.0, ...}
+                    None values indicate no limit in that direction
+    
+    Returns:
+        Clipped VTK ImageData
+    """
+    if not clip_bounds:
+        return grid_data
+    
+    # Get grid dimensions and bounds
+    dimensions = grid_data.GetDimensions()
+    bounds = grid_data.GetBounds()  # [xmin, xmax, ymin, ymax, zmin, zmax]
+    
+    # Calculate grid spacing
+    dx = (bounds[1] - bounds[0]) / max(1, dimensions[0] - 1)
+    dy = (bounds[3] - bounds[2]) / max(1, dimensions[1] - 1) 
+    dz = (bounds[5] - bounds[4]) / max(1, dimensions[2] - 1)
+    
+    # Convert coordinate bounds to grid indices
+    def coord_to_index(coord, bounds_min, spacing, max_index):
+        """Convert coordinate to grid index, clamped to valid range"""
+        if coord is None:
+            return None
+        index = int((coord - bounds_min) / spacing)
+        return max(0, min(index, max_index))
+    
+    # Calculate index bounds for each axis
+    imin = coord_to_index(clip_bounds.get('xmin'), bounds[0], dx, dimensions[0] - 1)
+    imax = coord_to_index(clip_bounds.get('xmax'), bounds[0], dx, dimensions[0] - 1)
+    jmin = coord_to_index(clip_bounds.get('ymin'), bounds[2], dy, dimensions[1] - 1)
+    jmax = coord_to_index(clip_bounds.get('ymax'), bounds[2], dy, dimensions[1] - 1)
+    kmin = coord_to_index(clip_bounds.get('zmin'), bounds[4], dz, dimensions[2] - 1)
+    kmax = coord_to_index(clip_bounds.get('zmax'), bounds[4], dz, dimensions[2] - 1)
+    
+    # Use default bounds if not specified
+    if imin is None:
+        imin = 0
+    if imax is None:
+        imax = dimensions[0] - 1
+    if jmin is None:
+        jmin = 0
+    if jmax is None:
+        jmax = dimensions[1] - 1
+    if kmin is None:
+        kmin = 0
+    if kmax is None:
+        kmax = dimensions[2] - 1
+    
+    # Ensure max >= min for each axis
+    if imax < imin:
+        imax = imin
+    if jmax < jmin:
+        jmax = jmin
+    if kmax < kmin:
+        kmax = kmin
+    
+    # Use vtkExtractVOI for vtkImageData
+    extract_filter = vtk.vtkExtractVOI()
+    extract_filter.SetInputData(grid_data)
+    extract_filter.SetVOI(imin, imax, jmin, jmax, kmin, kmax)
+    extract_filter.Update()
+    return extract_filter.GetOutput()
+
+
+def create_clip_plane_actors(
+    scene_bounds: tuple[float, float, float, float, float, float],
+    initial_values: dict[str, float],
+) -> tuple[dict[str, "vtk.vtkActor"], dict[str, "vtk.vtkPlaneSource"]]:
+    """Create six semi-transparent plane actors for clip-bound preview.
+
+    One actor per bound key (``'xmin'``, ``'xmax'``, ``'ymin'``, ``'ymax'``,
+    ``'zmin'``, ``'zmax'``).  Yellow = min bound, Blue = max bound.
+    All actors are created with ``VisibilityOff()``.
+
+    Args:
+        scene_bounds: ``(xmin, xmax, ymin, ymax, zmin, zmax)`` of the VTK scene
+                      in Bohr, used as the extent of each plane.
+        initial_values: mapping from bound key to initial coordinate value;
+                        should cover all six keys.
+
+    Returns:
+        ``(actors, sources)`` — two dicts keyed by bound string, holding the
+        ``vtkActor`` and ``vtkPlaneSource`` respectively.
+    """
+    bnd = scene_bounds
+    colors = {
+        'xmin': (1.0, 1.0, 0.0), 'xmax': (0.0, 0.0, 1.0),
+        'ymin': (1.0, 1.0, 0.0), 'ymax': (0.0, 0.0, 1.0),
+        'zmin': (1.0, 1.0, 0.0), 'zmax': (0.0, 0.0, 1.0),
+    }
+    actors: dict[str, vtk.vtkActor] = {}
+    sources: dict[str, vtk.vtkPlaneSource] = {}
+
+    for key in ('xmin', 'xmax', 'ymin', 'ymax', 'zmin', 'zmax'):
+        source = vtk.vtkPlaneSource()
+        source.SetResolution(10, 10)
+        val = initial_values[key]
+        axis = key[0]
+        if axis == 'x':
+            source.SetOrigin(val, bnd[2], bnd[4])
+            source.SetPoint1(val, bnd[3], bnd[4])
+            source.SetPoint2(val, bnd[2], bnd[5])
+        elif axis == 'y':
+            source.SetOrigin(bnd[0], val, bnd[4])
+            source.SetPoint1(bnd[1], val, bnd[4])
+            source.SetPoint2(bnd[0], val, bnd[5])
+        else:  # 'z'
+            source.SetOrigin(bnd[0], bnd[2], val)
+            source.SetPoint1(bnd[1], bnd[2], val)
+            source.SetPoint2(bnd[0], bnd[3], val)
+        source.Update()
+
+        mapper = vtk.vtkPolyDataMapper()
+        mapper.SetInputConnection(source.GetOutputPort())
+        actor = vtk.vtkActor()
+        actor.SetMapper(mapper)
+        r, g, b = colors[key]
+        actor.GetProperty().SetColor(r, g, b)
+        actor.GetProperty().SetOpacity(0.35)
+        actor.GetProperty().LightingOff()
+        actor.VisibilityOff()
+
+        sources[key] = source
+        actors[key] = actor
+
+    return actors, sources
+
+
+def move_clip_plane(
+    source: "vtk.vtkPlaneSource",
+    key: str,
+    val: float,
+    scene_bounds: tuple[float, float, float, float, float, float],
+) -> None:
+    """Update the geometry of a single clip-plane source.
+
+    Args:
+        source: the ``vtkPlaneSource`` to update.
+        key: bound key (``'xmin'``, ``'xmax'``, ``'ymin'``, etc.).
+        val: new coordinate value in Bohr.
+        scene_bounds: ``(xmin, xmax, ymin, ymax, zmin, zmax)`` of the scene.
+    """
+    bnd = scene_bounds
+    axis = key[0]
+    if axis == 'x':
+        source.SetOrigin(val, bnd[2], bnd[4])
+        source.SetPoint1(val, bnd[3], bnd[4])
+        source.SetPoint2(val, bnd[2], bnd[5])
+    elif axis == 'y':
+        source.SetOrigin(bnd[0], val, bnd[4])
+        source.SetPoint1(bnd[1], val, bnd[4])
+        source.SetPoint2(bnd[0], val, bnd[5])
+    else:  # 'z'
+        source.SetOrigin(bnd[0], bnd[2], val)
+        source.SetPoint1(bnd[1], bnd[2], val)
+        source.SetPoint2(bnd[0], bnd[3], val)
+    source.Modified()
+
+
+def fillcubeimage(data: CubeData, vec: bool = True, logscale: bool = False, aslist: bool = False) -> vtk.vtkImageData | list:
     """
     Fills a vtkImageData object
 
@@ -739,42 +905,123 @@ def fillcubeimage(data, vec=True, logscale=False, aslist=False):
     # print(norm.GetRange())
     return cubeimage
 
-def fillmolecule(atm, crd, wireframe=False,
-                 opacity=1):
+def fillmolecule(atm: np.ndarray, crd: np.ndarray,
+                 opacity: float = 1,
+                 bond_radius: float | None = None,
+                 atom_radius_scale: float | None = None,
+                 tubes_mode: bool = False,
+                 bond_tollerance: float = 0.23) -> MyvtkActor:
     """
+    Create a VTK molecule visualization.
 
     Args:
-        moldata (_type_): _description_
+        atm: List of atomic numbers
+        crd: Coordinates array
+        opacity (float): Molecule opacity (0.0-1.0)
+        bond_radius (float): Custom bond radius
+        atom_radius_scale (float): Custom atomic radius scale factor
+        tubes_mode (bool): If True, atoms use same radius as bonds
     """
+    # TODO implement a true bond perceiver
     mol = vtk.vtkMolecule()
     atoms = []
     for i in range(len(atm)):
-        atoms.append(mol.AppendAtom(atm[i],
-                                    *crd[i]))
-    # try:
-    #     bond = vtk.vtkPSimpleBondPerceiver()
-    # except AttributeError:
-    bond = vtk.vtkSimpleBondPerceiver()
-    bond.SetInputData(mol)
-    bond.Update()
-    molout = bond.GetOutput()
-    # Create a mapper
-    # mapper = vtk.vtkPolyDataMapper()
+        atoms.append(mol.AppendAtom(atm[i], *crd[i]))
+    
+    # Use VTK bond perceiver
+    bond_perceiver = vtk.vtkSimpleBondPerceiver()
+    bond_perceiver.SetInputData(mol)
+    bond_perceiver.SetTolerance(bond_tollerance)
+    bond_perceiver.Update()
+    molout = bond_perceiver.GetOutput()
+    
     mapper = vtk.vtkMoleculeMapper()
     mapper.UseLiquoriceStickSettings()
-    if wireframe:
-        mapper.SetAtomicRadiusScaleFactor(0.03)
-        mapper.SetBondRadius(0.03)
-    # mapper.SetInputConnection(source.GetOutputPort())
+    # mapper.UseMultiCylindersForBondsOn()
+    
+    # Apply bond radius if provided
+    if bond_radius is not None:
+        mapper.SetBondRadius(bond_radius)
+    
+    # Apply atom radius scale
+    if tubes_mode and bond_radius is not None:
+        # In tubes mode, atoms use the same size as bonds
+        mapper.SetAtomicRadiusScaleFactor(bond_radius)
+    elif atom_radius_scale is not None:
+        # Normal mode - use the specified atom radius scale
+        mapper.SetAtomicRadiusScaleFactor(atom_radius_scale)
+    
     mapper.SetInputData(molout)
-    # Create an actor
     actor = vtk.vtkActor()
     actor.SetMapper(mapper)
     actor.GetProperty().SetOpacity(opacity)
     return MyvtkActor(actor, mol)
 
-def _quivfromcube(cubdata: VecCubeData,
-logscale=False) -> vtk.vtkImageData:
+
+def fillmolecule_custom(atm: np.ndarray, crd: np.ndarray,
+                        opacity: float = 1,
+                        bond_radius: float | None = None,
+                        atom_radius_scale: float | None = None,
+                        tubes_mode: bool = False,
+                        bond_tollerance: float = 0.23,
+                        excluded_atoms: list[int] | None = None) -> MyvtkActor:
+    """
+    Create a VTK molecule visualization.
+
+    Args:
+        atm: List of atomic numbers
+        crd: Coordinates array
+        representation (legacy parameter)
+        opacity (float): Molecule opacity (0.0-1.0)
+        bond_radius (float): Custom bond radius
+        atom_radius_scale (float): Custom atomic radius scale factor
+        tubes_mode (bool): If True, atoms use same radius as bonds
+    """
+    # TODO implement a true bond perceiver
+    mol = vtk.vtkMolecule()
+    atoms = []
+    for i in range(len(atm)):
+        atoms.append(mol.AppendAtom(atm[i], *crd[i]))
+    
+    # Use VTK bond perceiver
+    bond_perceiver = vtk.vtkSimpleBondPerceiver()
+    bond_perceiver.SetInputData(mol)
+    bond_perceiver.SetTolerance(bond_tollerance)
+    bond_perceiver.Update()
+    molout = bond_perceiver.GetOutput()
+    
+    mapper = vtk.vtkMoleculeMapper()
+    mapper.UseLiquoriceStickSettings()
+    mapper.UseMultiCylindersForBondsOn()
+    
+    # Apply bond radius if provided
+    if bond_radius is not None:
+        mapper.SetBondRadius(bond_radius)
+    
+    # Apply atom radius scale
+    if tubes_mode and bond_radius is not None:
+        # In tubes mode, atoms use the same size as bonds
+        mapper.SetAtomicRadiusScaleFactor(bond_radius)
+    elif atom_radius_scale is not None:
+        # Normal mode - use the specified atom radius scale
+        mapper.SetAtomicRadiusScaleFactor(atom_radius_scale)
+
+    if excluded_atoms is not None:
+        for i in range(molout.GetNumberOfBonds()):
+            bond = molout.GetBond(i)
+            atom1_id = bond.GetBeginAtomId()
+            atom2_id = bond.GetEndAtomId()
+            if atom1_id in excluded_atoms and atom2_id in excluded_atoms:
+                molout.SetBondOrder(i, 0)  # Exclude this bond
+
+   
+    mapper.SetInputData(molout)
+    actor = vtk.vtkActor()
+    actor.SetMapper(mapper)
+    actor.GetProperty().SetOpacity(opacity)
+    return MyvtkActor(actor, mol)
+
+def _quivfromcube(cubdata: VecCubeData, logscale: bool = False) -> vtk.vtkImageData:
     """
     Return a vtkImageData object with the vector field
     from a VecCubeData object.
@@ -785,15 +1032,17 @@ logscale=False) -> vtk.vtkImageData:
     return grid
 
 def quiv3d(
-    vecdata: tp.Union[VecCubeData, vtk.vtkPolyData],
+    vecdata: VecCubeData | vtk.vtkPolyData,
     lower: float = 0.0001,
     upper: float = 0.01,
     scale: float = 1,
     logscale: bool = False,
-    subsample_factor: tp.Optional[int] = None
+    subsample_factor: int | None = None,
+    glyphmode: str = 'arrow',
+    clip_bounds: dict[str, float | None] | None = None
 ) -> MyvtkActor:
     """
-    Return a vtk actor with 3D quiver plot
+    Return a vtk actor with 3D quiver plot with optional spatial clipping
 
     Args:
         vecdata: VecCubeData object or vtkPolyData with vector field
@@ -801,6 +1050,8 @@ def quiv3d(
         scale: scale factor for arrows
         logscale: if True, use logarithmic scaling
         subsample_factor: if provided, show only every nth vector for better performance
+        glyphmode: 'arrow' or 'cone' for glyph type
+        clip_bounds: dict with xmin, xmax, ymin, ymax, zmin, zmax for spatial clipping
 
     Returns:
         MyvtkActor with quiver plot
@@ -814,6 +1065,10 @@ def quiv3d(
 
     _grid.GetPointData().SetActiveVectors('vector')
     _grid.GetPointData().SetActiveScalars('scalar')
+    
+    # Apply spatial clipping if requested
+    if clip_bounds is not None and isinstance(vecdata, VecCubeData):
+        _grid = apply_spatial_clipping(_grid, clip_bounds)
 
     # Apply subsampling if requested
     # Only apply subsampling for VecCubeData
@@ -829,11 +1084,18 @@ def quiv3d(
         mask.SetOnRatio(subsample_factor)
         mask.Update()
         _grid = mask.GetOutput()
-
-    arrow = vtk.vtkArrowSource()
+    if glyphmode == 'arrow':
+        vtkglyph = vtk.vtkArrowSource()
+    elif glyphmode == 'cone':
+        vtkglyph = vtk.vtkConeSource()
+        vtkglyph.SetResolution(12)
+        # vtkglyph.SetHeight(0.8)
+        # vtkglyph.SetRadius(0.3)
+    else:
+        raise ValueError("glyphmode must be 'arrow' or 'cone'")
     glyphs = vtk.vtkGlyph3D()
     glyphs.SetInputData(_grid)
-    glyphs.SetSourceConnection(arrow.GetOutputPort())
+    glyphs.SetSourceConnection(vtkglyph.GetOutputPort())
     # the mapper
     glyph_mapper = vtk.vtkPolyDataMapper()
     glyph_mapper.SetInputConnection(glyphs.GetOutputPort())
@@ -854,29 +1116,31 @@ def quiv3d(
     # filtering
     threshold = vtk.vtkThresholdPoints()
     threshold.SetInputData(_grid)
-    threshold.ThresholdBetween(lower, upper)
+    threshold.SetLowerThreshold(lower)
+    threshold.SetUpperThreshold(upper)
     glyphs.SetInputConnection(threshold.GetOutputPort())
 
     return MyvtkActor(glyph_actor, glyphs)
 
 
-def draw_nm3d(crd, evec, ian,
-              cngsign=True,
-              chgwght=True, scale=1,
-              color="blue"):
-    """_summary_
+def draw_nm3d(crd: np.ndarray, evec: np.ndarray, ian: np.ndarray,
+              cngsign: bool = True,
+              chgwght: bool = True,
+              scale: float = 1,
+              color: str | tuple = 'blue') -> MyvtkActor:
+    """ Draw a 3D quiver plot of the normal modes.
 
     Args:
-        crd (_type_): _description_
-        evec (_type_): _description_
-        ian (_type_): _description_
-        cngsign (bool, optional): _description_. Defaults to True.
-        chgwght (bool, optional): _description_. Defaults to True.
-        scale (int, optional): _description_. Defaults to 1.
-        color (str, optional): _description_. Defaults to "blue".
+        crd (np.ndarray): atomic coordinates
+        evec (np.ndarray): normal mode eigenvectors
+        ian (np.ndarray): atomic numbers
+        cngsign (bool, optional): Invert the phase of the eigenvectors. Defaults to True.
+        chgwght (bool, optional): Weight the eigenvectors by the atomic numbers. Defaults to True.
+        scale (float, optional): Scale factor for the arrows. Defaults to 1.
+        color (str | tuple, optional): Color name (str) or RGB tuple (0.0-1.0). Defaults to 'blue'.
 
     Returns:
-        _type_: _description_
+        MyvtkActor: _description_
     """
 
     # change the sign to be opposed to the TCD (must be done before weighting)
@@ -917,6 +1181,9 @@ def draw_nm3d(crd, evec, ian,
     polydata = create_vector_field_polydata(crd, norm_evec, np.ones(natm), vector_name='vector', scalar_name='ones')
 
     arrow = vtk.vtkArrowSource()
+    # increase the resolution of the arrow for better visualization
+    arrow.SetTipResolution(12)
+    arrow.SetShaftResolution(12)
     glyphs = vtk.vtkGlyph3D()
     glyphs.SetInputData(polydata)
     glyphs.SetSourceConnection(arrow.GetOutputPort())
@@ -931,13 +1198,21 @@ def draw_nm3d(crd, evec, ian,
     glyphs.SetScaleModeToScaleByVector()
     # Scale factor
     glyphs.SetScaleFactor(scale)
+    # Turn off scalar visibility on mapper to use uniform color
+    glyph_mapper.ScalarVisibilityOff()
     clrs = vtk.vtkNamedColors()
-    glyphs.SetColorModeToColorByScalar()
-    glyph_actor.GetProperty().SetColor(clrs.GetColor3d(color))
-
+    
+    # Handle color parameter - accept both string names and RGB tuples
+    if isinstance(color, (tuple, list)):
+        # RGB tuple/list (values 0.0-1.0)
+        glyph_actor.GetProperty().SetColor(color[0], color[1], color[2])
+    else:
+        # String color name
+        glyph_actor.GetProperty().SetColor(clrs.GetColor3d(color))
+    
     return MyvtkActor(glyph_actor, glyphs)
 
-def draw_vectors(crd, vecs, tps, scale=1):
+def draw_vectors(crd: np.ndarray, vecs: np.ndarray, tps: np.ndarray, scale: float = 1) -> MyvtkActor:
     """_summary_
 
     Args:
@@ -984,6 +1259,8 @@ def draw_vectors(crd, vecs, tps, scale=1):
     polydata.GetPointData().SetActiveScalars('ones')
 
     arrow = vtk.vtkArrowSource()
+    arrow.SetTipResolution(12)
+    arrow.SetShaftResolution(12)
     glyphs = vtk.vtkGlyph3D()
     glyphs.SetInputData(polydata)
     glyphs.SetSourceConnection(arrow.GetOutputPort())
@@ -996,7 +1273,7 @@ def draw_vectors(crd, vecs, tps, scale=1):
 
     # color map
     lut = vtk.vtkColorTransferFunction()
-    lut.AddRGBPoint(-4, 1,.3,1)
+    lut.AddRGBPoint(-4, 102/255,0,102/255)
     lut.AddRGBPoint(-3, 153/255,0,0)
     lut.AddRGBPoint(-2, 1,0,0)
     lut.AddRGBPoint(-1, 1,128/255,0)
@@ -1004,7 +1281,7 @@ def draw_vectors(crd, vecs, tps, scale=1):
     lut.AddRGBPoint(1, 125/255,1,0)
     lut.AddRGBPoint(2, 0,1,0)
     lut.AddRGBPoint(3, 0,102/255,0)
-    lut.AddRGBPoint(4, 1,1,0)
+    lut.AddRGBPoint(4, 0,102/255,51/255)
     glyph_mapper.SetLookupTable(lut)
 
     glyphs.SetVectorModeToUseVector()
@@ -1017,26 +1294,30 @@ def draw_vectors(crd, vecs, tps, scale=1):
 
 
 def fillstreamline(cubdata: CubeData,
-                   nseeds: tp.Optional[int] = 150,
-                   center: tp.Optional[list] = [0., 0., 0.],
-                   opacity: tp.Optional[float] = 0.3,
-                   clipping: tp.Optional[tuple] = (1e2, 1e5),
-                   minspeed: tp.Optional[tp.Union[float, None]] = None,
-                   seeds: tp.Optional[tp.Union[np.ndarray, None]] = None,
-                   scale_rad=1) -> MyvtkActor:
-    """_summary_
+                   nseeds: int = 150,
+                   center: list[float] = [0., 0., 0.],
+                   opacity: float = 0.3,
+                   clipping: tuple[float, float] = (1e2, 1e5),
+                   minspeed: float | None = None,
+                   seeds: np.ndarray | None = None,
+                   scale_rad: float = 1,
+                   clip_bounds: dict[str, float | None] | None = None) -> MyvtkActor:
+    """Generate streamlines from vector field with optional spatial clipping.
 
     Args:
-        cubdata (CubeData): _description_
-        nseeds (tp.Optional[int], optional): _description_. Defaults to 150.
-        center (tp.Optional[list], optional): _description_. Defaults to [0., 0., 0.].
-        opacity (tp.Optional[float], optional): _description_. Defaults to 0.3.
-        clipping (tp.Optional[tuple], optional): _description_. Defaults to (1e2, 1e5).
-        minvel (tp.Optional[tp.Union[float, None]], optional): _description_. Defaults to None.
-        scale_rad (int, optional): _description_. Defaults to 1.
+        cubdata (CubeData): Vector field cube data
+        nseeds (int, optional): Number of seed points. Defaults to 150.
+        center (list, optional): Center for seed distribution. Defaults to [0., 0., 0.].
+        opacity (float, optional): Streamline opacity. Defaults to 0.3.
+        clipping (tuple, optional): Magnitude clipping bounds. Defaults to (1e2, 1e5).
+        minspeed (float | None, optional): Minimum speed for termination. Defaults to None.
+        seeds (np.ndarray | None, optional): Custom seed points. Defaults to None.
+        scale_rad (int, optional): Radius scaling factor. Defaults to 1.
+        clip_bounds (dict[str, float | None] | None, optional): 
+            Spatial clipping bounds with keys: xmin, xmax, ymin, ymax, zmin, zmax. Defaults to None.
 
     Returns:
-        vtk.vtkActor: _description_
+        MyvtkActor: VTK actor containing streamlines and optional clipped data reference
     """
 
     # Vectors stuff
@@ -1044,7 +1325,13 @@ def fillstreamline(cubdata: CubeData,
     _grid = fillcubeimage(cubdata)
     _grid.GetPointData().SetActiveVectors('vector')
     _grid.GetPointData().SetActiveScalars('scalar')
-    _bounds = _grid.GetScalarRange()
+    
+    # Apply spatial clipping if requested
+    clipped_grid = _grid
+    if clip_bounds is not None:
+        clipped_grid = apply_spatial_clipping(_grid, clip_bounds)
+    
+    _bounds = clipped_grid.GetScalarRange()
     # visualizing only a portion between the two bounds
     _bounds2 = (_bounds[1]/clipping[1],
                 _bounds[1]/clipping[0])
@@ -1066,7 +1353,7 @@ def fillstreamline(cubdata: CubeData,
     # Streamlines stuff
     integrator=vtk.vtkRungeKutta45()
     streamline = vtk.vtkStreamTracer()
-    streamline.SetInputData(_grid)
+    streamline.SetInputData(clipped_grid)  # Use clipped grid
     if _flag:
         streamline.SetSourceConnection(_seeds.GetOutputPort())
     else:
@@ -1118,7 +1405,7 @@ def fillstreamline(cubdata: CubeData,
     
     return actor_wrapper
 
-def countur(cubedata, isoval, active='scalar', colors=None, opacity=0.3):
+def countur(cubedata: 'CubeData', isoval: list[float], active: str = 'scalar', colors: list | None = None, opacity: float = 0.3) -> MyvtkActor:
     """
     Return vtk actor with the isosurface plotted
     param: xax, yax, zax 3d grid of dimension NxNxN
@@ -1131,7 +1418,7 @@ def countur(cubedata, isoval, active='scalar', colors=None, opacity=0.3):
     # grid.GetPointData().SetActiveScalars(active)
     return _countur(grid, isoval, active, colors, opacity)
 
-def _countur(grid, isoval, active='scalar', colors=None, opacity=0.3):
+def _countur(grid: vtk.vtkImageData, isoval: list[float], active: str = 'scalar', colors: list | None = None, opacity: float = 0.3) -> MyvtkActor:
     # grid.GetPointData().SetActiveVectors("vector")
     grid.GetPointData().SetActiveScalars(active)
     # bounds = grid.GetScalarRange()
@@ -1165,6 +1452,53 @@ def _countur(grid, isoval, active='scalar', colors=None, opacity=0.3):
     isosurf_actor.VisibilityOn()
 
     return MyvtkActor(isosurf_actor, contourFilter)
+
+def volumerendering(cubedata: 'CubeData', active: str = 'scalar',
+                    lower: float = 0.0, upper: float = 1.0,
+                    opacity: float = 1.0) -> MyvtkActor:
+    grid = fillcubeimage(cubedata)
+    return _volumerendering(grid, active, lower, upper, opacity)
+
+def _volumerendering(grid: vtk.vtkImageData,
+                     active: str = 'scalar',
+                     lower: float = 0.0,
+                     upper: float = 1.0,
+                     opacity: float = 1.0) -> MyvtkActor:
+    """
+    Return a vtk actor with volume rendering
+    from a vtkImageData object.
+    Args:
+        grid (vtk.vtkImageData): Input image data for volume rendering.
+        lower (float): Lower bound for scalar range.
+        upper (float): Upper bound for scalar range.
+        opacity (float): Opacity for the volume rendering.  
+    Returns:
+        MyvtkActor: Actor containing the volume rendering.
+    """
+    grid.GetPointData().SetActiveScalars(active)
+    # Create transfer mapping scalar value to opacity
+    opacityTransferFunction = vtk.vtkPiecewiseFunction()
+    opacityTransferFunction.AddPoint(lower, 0.0)
+    opacityTransferFunction.AddPoint(upper, opacity)
+    # Create transfer mapping scalar value to color
+    colorTransferFunction = vtk.vtkColorTransferFunction()
+    colorTransferFunction.AddRGBPoint(lower, 1.0, 0.0, 0.0)  # Red for low values
+    colorTransferFunction.AddRGBPoint(upper, 0.0, 0.0, 1.0)  # Blue for high values
+    # The property describes how the data will look
+    volumeProperty = vtk.vtkVolumeProperty()
+    volumeProperty.SetColor(colorTransferFunction)
+    volumeProperty.SetScalarOpacity(opacityTransferFunction)
+    volumeProperty.ShadeOn()
+    volumeProperty.SetInterpolationTypeToLinear()
+    # The mapper / ray cast function know how to render the data
+    volumeMapper = vtk.vtkSmartVolumeMapper()
+    volumeMapper.SetInputData(grid)
+    # The volume holds the mapper and the property and
+    # can be used to position/orient the volume
+    volume = vtk.vtkVolume()
+    volume.SetMapper(volumeMapper)
+    volume.SetProperty(volumeProperty)
+    return MyvtkActor(volume, volumeMapper)
 
 
 def draw_colorbar(targetactor: vtk.vtkActor, title: str,
@@ -1270,7 +1604,7 @@ class StreamlineParticleAnimator:
     Handles animated particles along streamlines in VTK.
     """
     
-    def __init__(self, renderer: vtk.vtkRenderer, particle_type: str = "sphere"):
+    def __init__(self, renderer: vtk.vtkRenderer, particle_type: str = 'sphere') -> None:
         """
         Initialize the particle animator.
         
@@ -1625,7 +1959,7 @@ class StreamlineParticleAnimator:
         for particle in self.particle_actors:
             particle['actor'].SetVisibility(visible)
     
-    def update_particle_type(self, new_particle_type: str, streamline_polydata: vtk.vtkPolyData, num_particles: int = None) -> None:
+    def update_particle_type(self, new_particle_type: str, streamline_polydata: vtk.vtkPolyData, num_particles: int | None = None) -> None:
         """
         Update the particle type for existing animation.
         
@@ -1671,6 +2005,8 @@ class StreamlineParticleAnimator:
         """
         if hasattr(self, 'ren') and self.ren is not None:
             self.ren.GetRenderWindow().Render()
+
+
 
 
 def create_streamline_particles(renderer: vtk.vtkRenderer, 
