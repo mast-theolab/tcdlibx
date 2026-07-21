@@ -738,7 +738,11 @@ class TCDvis(QMainWindow):
     def _enable_molmenu(self):
         for val in self._menus['mol']:
             #print(val)
-            if not val == 'nm' and 'dmt' not in val:
+            if 'dmt' in val:
+                continue
+            if isinstance(self._menus['mol'][val], dict):
+                self._menus['mol'][val]['menu'].setEnabled(True)
+            else:
                 self._menus['mol'][val].setEnabled(True)
                 
         # Enable molecule-type specific menus

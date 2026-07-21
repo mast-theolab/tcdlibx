@@ -20,7 +20,7 @@ def draw_tensor_spheres(positions: np.ndarray,
                        vector_scale: float = 0.3,
                        opacity: float = 0.8,
                        show_spheres: bool = True,
-                       weights: tp.Optional[np.ndarray] = None,
+                       weights: np.ndarray | None = None,
                        color_scheme: str = 'magnitude') -> MyvtkActor:
     """
     Visualize 3x3 tensors at given positions as vectors on unit spheres.
@@ -179,8 +179,8 @@ def draw_molecular_tensors(mol_data,
                           vector_scale: float = 2,
                           opacity: float = 0.8,
                           color_scheme: str = 'magnitude',
-                          atom_filter: tp.Optional[tp.List[str]] = None,
-                          frag_filter: tp.Optional[tp.List[int]] = None,
+                          atom_filter: list[str] | None = None,
+                          frag_filter: list[int] | None = None,
                           show_spheres: bool = False) -> MyvtkActor:
     """
     Convenience function to visualize molecular tensors from VibMolecule data.
@@ -282,7 +282,7 @@ def draw_tensor_surface_from_norms(positions: np.ndarray,
                                   nb_sphere_samples: int = 500,
                                   surface_scale: float = 1.0,
                                   opacity: float = 0.7,
-                                  weights: tp.Optional[np.ndarray] = None,
+                                  weights: np.ndarray | None = None,
                                   color_scheme: str = 'magnitude') -> MyvtkActor:
     """
     Generate independent surfaces on each atom using the norm of vectors computed with tensor operations.
@@ -472,8 +472,8 @@ def draw_molecular_tensor_surface(mol_data,
                                 surface_scale: float = 1.0,
                                 opacity: float = 0.7,
                                 color_scheme: str = 'magnitude',
-                                atom_filter: tp.Optional[tp.List[str]] = None,
-                                frag_filter: tp.Optional[tp.List[int]] = None) -> MyvtkActor:
+                                atom_filter: list[str] | None = None,
+                                frag_filter: list[int] | None = None) -> MyvtkActor:
     """
     Create tensor-based surfaces from molecular data using norm-based surface generation.
     
