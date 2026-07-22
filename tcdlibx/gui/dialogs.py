@@ -1267,6 +1267,139 @@ class TensorSetupDialog(QDialog):
             self._frag_line.setText(self._frag_filter_str)
         self._frag_line.textChanged.connect(self._setfragfilter)
         grid.addWidget(self._frag_line, 12, 0)
+        
+        # Dialog buttons
+        QBtn = QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        self.buttonBox = QDialogButtonBox(QBtn)
+        self.buttonBox.accepted.connect(self.accept)
+        self.accepted.connect(self._setvals)
+        self.buttonBox.rejected.connect(self.reject)
+        
+        self.vlay.addWidget(self.buttonBox)
+        self.setLayout(self.vlay)
+    
+    def _setvals(self):
+        """Set the values from the dialog controls."""
+        self._sphere_radius = self._radius_line._getvalue()
+        self._nb_sphere_samples = self._samples_line._getvalue()
+        self._nb_sphere_surface = self._surface_samples_line._getvalue()
+        self._vector_scale = self._scale_line._getvalue()
+        self._surface_scale = self._surface_scale_line._getvalue()
+        self._opacity = self._opacity_line._getvalue()
+        # color_scheme and surf_color_scheme are already set by the combo box callbacks
+    
+    def _setcolorscheme(self):
+        """Set the color scheme from the combo box."""
+        self._color_scheme = self._color_combo.currentText()
+    
+    def _setsurfcolorscheme(self):
+        """Set the surface color scheme from the combo box."""
+        self._surf_color_scheme = self._surf_color_combo.currentText()
+    
+    def _setatomfilter(self):
+        """Set the atom filter from the text input."""
+        self._atom_filter = self._filter_line.text().strip()
+        if not self._atom_filter:
+            self._atom_filter = None
+    
+    def _setshowspheres(self):
+        """Set the show spheres flag from the checkbox."""
+        self._show_spheres = self._show_spheres_checkbox.isChecked()
+    
+    def _settensorlevel(self):
+        """Set the tensor level (total/electronic/nuclear) from the combo box."""
+        self._tensor_level = self._tensor_level_combo.currentData()
+    
+    def _setusefrags(self):
+        """Enable/disable the fragment filter based on the checkbox state."""
+        self._use_frags = self._frag_checkbox.isChecked()
+        self._frag_line.setEnabled(self._use_frags)
+        if not self._use_frags:
+            self._frag_filter_str = None
+    
+    def _setfragfilter(self):
+        """Set the fragment filter string from the text input."""
+        self._frag_filter_str = self._frag_line.text().strip()
+        if not self._frag_filter_str:
+            self._frag_filter_str = None
+    
+    @property
+    def sphere_radius(self) -> float:
+        """Get the sphere radius value."""
+        return self._sphere_radius
+    
+    @property
+    def nb_sphere_samples(self) -> int:
+        """Get the number of sphere samples for vectors."""
+        return self._nb_sphere_samples
+    
+    @property
+    def nb_sphere_surface(self) -> int:
+        """Get the number of sphere samples for surfaces."""
+        return self._nb_sphere_surface
+    
+    @property
+    def vector_scale(self) -> float:
+        """Get the vector scale factor."""
+        return self._vector_scale
+    
+    @property
+    def surface_scale(self) -> float:
+        """Get the surface scale factor."""
+        return self._surface_scale
+    
+    @property
+    def opacity(self) -> float:
+        """Get the opacity value."""
+        return self._opacity
+    
+    @property
+    def color_scheme(self) -> str:
+        """Get the vector color scheme."""
+        return self._color_scheme
+    
+    @property
+    def surf_color_scheme(self) -> str:
+        """Get the surface color scheme."""
+        return self._surf_color_scheme
+    
+    @property
+    def atom_filter(self) -> tp.Optional[tp.List[str]]:
+        """Get the atom filter as a list of atomic symbols."""
+        if self._atom_filter is None or self._atom_filter == "":
+            return None
+        # Split by comma and strip whitespace from each symbol
+        symbols = [symbol.strip() for symbol in self._atom_filter.split(',')]
+        # Filter out empty strings
+        symbols = [symbol for symbol in symbols if symbol]
+        return symbols if symbols else None
+    
+    @property
+    def show_spheres(self) -> bool:
+        """Get the show spheres flag."""
+        return self._show_spheres
+    
+    @property
+    def tensor_level(self) -> str:
+        """Get the tensor contribution level ('tot', 'ele', or 'nuc')."""
+        return self._tensor_level
+    
+    @property
+    def frag_filter(self) -> tp.Optional[tp.List[int]]:
+        """Get the fragment filter as a list of fragment indices.
+
+        Returns:
+            None if the fragment filter checkbox is unchecked (or no fragments
+            are loaded), otherwise a list of the selected fragment indices.
+        """
+        if not self._use_frags or not self._frag_filter_str:
+            return None
+        try:
+            indices = [int(x.strip())-1 for x in self._frag_filter_str.split(',') if x.strip()]
+        except ValueError:
+            return None
+        return indices if indices else None
+
 
 class MoleculeConfigDialog(QDialog):
     def __init__(self, parent=None, wireframe=False, opacity=1.0, bond_radius=0.03, atom_radius_scale=0.03, tubes_mode=False, bond_tollerance=0.23, hide_auto_group=False, has_auto_fragment=False):
