@@ -773,6 +773,11 @@ class TCDvis(QMainWindow):
             self._menus['vtcd'][val].setEnabled(False)
         self._menus['vtcddtm']['frags'].setEnabled(False)
 
+    def _ensure_default_mspeed(self):
+        """Set the streamline terminal speed shared by showtcd and the setup dialog."""
+        if self._default["vfield"]["mspeed"] is None:
+            self._default["vfield"]["mspeed"] = self._fchk.get_tcd(self._activest)._maxnorm/1e4
+
     def _fieldstp(self):
         current_prop = self.prop.currentText().lower()
 
@@ -792,8 +797,7 @@ class TCDvis(QMainWindow):
         
         if current_prop == "streamlines":
             # Handle streamlines setup dialog
-            if self._default["vfield"]["mspeed"] is None:
-                self._default["vfield"]["mspeed"] = self._fchk.get_tcd(self._activest)._maxnorm/1e4
+            self._ensure_default_mspeed()
             fieldprm = StreamLineSetupDialog(vfmax=self._default["vfield"]["vfmax"],
                                              vfmin=self._default["vfield"]["vfmin"],
                                              mspeed=self._default["vfield"]["mspeed"],
@@ -1462,6 +1466,7 @@ class TCDvis(QMainWindow):
         tmp_iso = [-self._default['isoval']['iso'],
                    self._default['isoval']['iso']]
         if prop_cur == "streamlines":
+            self._ensure_default_mspeed()
             if self._seeds is None:
                 if self._default["vfield"]["sampling_method"] == "ellipsoid":
                     self._seeds = self._fchk.sample_ellipse_space(self._default["vfield"]["npoints"], scale=self._default["vfield"]["scalellipse"])

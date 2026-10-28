@@ -1097,7 +1097,7 @@ class TensorSetupDialog(QDialog):
                  surface_scale: float = 1.0,
                  opacity: float = 0.8,
                  color_scheme: str = 'weight_mag',
-                 surf_color_scheme: str = 'magnitude',
+                 surf_color_scheme: str = 'weight_mag',
                  atom_filter: tp.Optional[str] = None,
                  show_spheres: bool = False,
                  tensor_level: str = 'tot',
@@ -1114,7 +1114,7 @@ class TensorSetupDialog(QDialog):
             surface_scale: Scale factor for the surfaces
             opacity: Opacity of the visualization
             color_scheme: Color scheme for vectors ('magnitude', 'weight_mag', 'uniform')
-            surf_color_scheme: Color scheme for surfaces ('magnitude', 'uniform')
+            surf_color_scheme: Color scheme for surfaces ('magnitude', 'weight_mag', 'uniform', 'signed')
             atom_filter: Comma-separated atomic symbols to filter (e.g., "C,N,O")
             show_spheres: Whether to show pale yellow spheres at tensor positions
             tensor_level: Contribution to visualize ('tot', 'ele', or 'nuc')
@@ -1206,7 +1206,7 @@ class TensorSetupDialog(QDialog):
         # Color scheme for surfaces
         surf_color_label = QLabel("Surface color scheme:")
         self._surf_color_combo = QComboBox()
-        self._surf_color_combo.addItems(['magnitude', 'uniform', 'signed'])
+        self._surf_color_combo.addItems(['magnitude', 'weight_mag', 'uniform', 'signed'])
         self._surf_color_combo.setCurrentText(surf_color_scheme)
         self._surf_color_combo.currentTextChanged.connect(self._setsurfcolorscheme)
         

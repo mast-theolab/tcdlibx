@@ -35,85 +35,88 @@
 from numba import jit, double
 import math
 import numpy as np
+import numpy.typing as npt
+
+Vec3 = npt.NDArray[np.float64]
 
 @jit(nopython = True)
-def sum2(vec, result):
+def sum2(vec: Vec3, result: Vec3) -> None:
     """ Calculate the sum of two 3d vectors and store the result in the second parameter. """
     result[0] = vec[0] + result[0]
     result[1] = vec[1] + result[1]
     result[2] = vec[2] + result[2]
 
 @jit(nopython = True)
-def sum3(vec1, vec2, result):
+def sum3(vec1: Vec3, vec2: Vec3, result: Vec3) -> None:
     """ Calculate the sum of two 3d vectors and store the result in the third parameter. """
     result[0] = vec1[0] + vec2[0]
     result[1] = vec1[1] + vec2[1]
     result[2] = vec1[2] + vec2[2]
 
 @jit(nopython = True)
-def sub2(vec, result):
+def sub2(vec: Vec3, result: Vec3) -> None:
     """ Calculate the difference of two 3d vectors and store the result in the second parameter. """
     result[0] = result[0] - vec[0]
     result[1] = result[1] - vec[1]
     result[2] = result[2] - vec[2]
 
 @jit(nopython = True)
-def sub3(vec1, vec2, result):
+def sub3(vec1: Vec3, vec2: Vec3, result: Vec3) -> None:
     """ Calculate the difference of two 3d vectors and store the result in the third parameter. """
     result[0] = vec1[0] - vec2[0]
     result[1] = vec1[1] - vec2[1]
     result[2] = vec1[2] - vec2[2]
 
 @jit(nopython = True)
-def mul2(a, result):
+def mul2(a: float, result: Vec3) -> None:
     """ Calculate the product of a scalar and a 3d vector and store the result in the second parameter."""
     result[0] = a * result[0]
     result[1] = a * result[1]
     result[2] = a * result[2]
 
 @jit(nopython = True)
-def mul3(a, vec, result):
-    """ Calculate the product of a scalar and a 3d vector. """
+def mul3(a: float, vec: Vec3, result: Vec3) -> None:
+    """ Calculate the product of a scalar and a 3d vector and store the result in the third parameter. """
     result[0] = a * vec[0]
     result[1] = a * vec[1]
     result[2] = a * vec[2]
 
 @jit(nopython = True)
-def div2(a, result):
+def div2(a: float, result: Vec3) -> None:
     """ Divide a 3d vector by a scalar and store the result in the second parameter."""
     result[0] = result[0] / a
     result[1] = result[1] / a
     result[2] = result[2] / a
 
 @jit(nopython = True)
-def div3(a, vec, result):
+def div3(a: float, vec: Vec3, result: Vec3) -> None:
     """ Divide a 3d vector by a scalar and store the result in the third parameter. """
     result[0] = vec[0] / a
     result[1] = vec[1] / a
     result[2] = vec[2] / a
 
 @jit(nopython = True)
-def neg_sum(a, b, c, result):
+def neg_sum(a: Vec3, b: Vec3, c: Vec3, result: Vec3) -> None:
     """ Calculate the sum of three vectors and multiply the result with -1. """
     result[0] = -(a[0] + b[0] + c[0])
     result[1] = -(a[1] + b[1] + c[1])
     result[2] = -(a[2] + b[2] + c[2])
 
 @jit(nopython = True)
-def copy2(a, result):
-    """ Calculate the difference of two 3d vectors. """
+def copy2(a: Vec3, result: Vec3) -> None:
+    """ Copy a 3d vector into the second parameter. """
     result[0] = a[0]
     result[1] = a[1]
     result[2] = a[2]
 
 @jit
-def cross(vec1, vec2):
+def cross(vec1: Vec3, vec2: Vec3) -> Vec3:
     """ Calculate the cross product of two 3d vectors. """
     result = np.zeros(3)
     return cross_(vec1, vec2, result)
 
 @jit(nopython=True)
-def cross_(vec1, vec2, result):
+def cross_(vec1: Vec3, vec2: Vec3, result: Vec3) -> Vec3:
     """ Calculate the cross product of two 3d vectors. """
     a1, a2, a3 = double(vec1[0]), double(vec1[1]), double(vec1[2])
     b1, b2, b3 = double(vec2[0]), double(vec2[1]), double(vec2[2])
@@ -123,7 +126,7 @@ def cross_(vec1, vec2, result):
     return result
 
 @jit(nopython=True)
-def cross3(vec1, vec2, result):
+def cross3(vec1: Vec3, vec2: Vec3, result: Vec3) -> None:
     """ Calculate the cross product of two 3d vectors. """
     a1, a2, a3 = double(vec1[0]), double(vec1[1]), double(vec1[2])
     b1, b2, b3 = double(vec2[0]), double(vec2[1]), double(vec2[2])
@@ -132,23 +135,23 @@ def cross3(vec1, vec2, result):
     result[2] = a1 * b2 - a2 * b1
 
 @jit(nopython=True)
-def dot(vec1, vec2):
+def dot(vec1: Vec3, vec2: Vec3) -> float:
     """ Calculate the dot product of two 3d vectors. """
     return vec1[0] * vec2[0] + vec1[1] * vec2[1] + vec1[2] * vec2[2]
 
 @jit(nopython=True)
-def norm(vec):
+def norm(vec: Vec3) -> float:
     """ Calculate the norm of a 3d vector. """
     return math.sqrt(vec[0]*vec[0] + vec[1]*vec[1] + vec[2]*vec[2])
 
 @jit()
-def normalize(vec):
+def normalize(vec: Vec3) -> Vec3:
     """ Calculate the normalized vector (norm: one). """
     result = np.copy(vec)
     return normalize1(result)
 
 @jit(nopython = True)
-def normalize1(vec):
+def normalize1(vec: Vec3) -> Vec3:
     norm_=norm(vec)
     if norm_ < 1e-6:
         vec[0] = 0.
@@ -161,7 +164,7 @@ def normalize1(vec):
     return vec
 
 @jit(nopython = True)
-def normalize2(vec, result):
+def normalize2(vec: Vec3, result: Vec3) -> None:
     norm_=norm(vec)
     if norm_ < 1e-6:
         result[0] = 0.
@@ -172,7 +175,7 @@ def normalize2(vec, result):
         result[1] = vec[1] / norm_
         result[2] = vec[2] / norm_
 
-def init():
+def init() -> None:
     """ call all functions once to compile them """
     vec1, vec2 = np.array((1.0, 2.0, 3.0)), np.array((2.0, 3.0, 4.0))
     result = np.zeros(3)
