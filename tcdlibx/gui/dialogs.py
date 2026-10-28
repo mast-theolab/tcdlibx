@@ -1686,3 +1686,89 @@ class StreamLineSetupDialog(QDialog, _ClipPlaneMixin):
         self._enable_clipping = is_enabled
         self._update_clipping_toggle(is_enabled)
 
+
+
+class AnimateDialog(QDialog):
+    """Options of the vector-field animation (moving arrows, vibrating nuclei).
+
+    Args:
+        parent: parent widget
+        opts: current animation parameters (keys of vfield_anim.ANIM_DEFAULTS)
+        mode: normal mode being animated (shown in the dialog)
+    """
+    _FIELDS = (('nucfactor', 'Nuclear amplitude factor (x physical v=1):', float),
+               ('npoints', 'Number of arrows:', int),
+               ('scalevdw', 'Seed region (vdW radii):', float),
+               ('seed', 'Random seed:', int),
+               ('qupper_pct', 'Arrow length cap (percentile of |F|):', float),
+               ('qlower', 'Hide arrows below (fraction):', float),
+               ('arrowlen', 'Arrow length at the cap (Angstrom):', float),
+               ('travel', 'Arrow travel (arrow lengths):', float),
+               ('nframes', 'Frames per period:', int),
+               ('period', 'Period (s):', float))
+
+    def __init__(self, parent=None, opts: dict | None = None, mode: int | None = None):
+        super().__init__(parent)
+        from tcdlibx.graph.vfield_anim import ANIM_DEFAULTS
+        self._opts = dict(ANIM_DEFAULTS)
+        self._opts.update(opts or {})
+        self._mode = mode
+        self._gif = None
+        self._okexit = False
+        self.setWindowTitle("Animate vector field")
+
+        grid = QGridLayout()
+        row = 0
+        if mode is not None:
+            grid.addWidget(QLabel(f'Normal mode: {mode}', self), row, 0, 1, 2)
+            row += 1
+        self._lines = {}
+        for key, text, kind in self._FIELDS:
+            grid.addWidget(QLabel(text, self), row, 0)
+            line = QLineEdit(self)
+            validator = QIntValidator(self) if kind is int else QDoubleValidator(self)
+            validator.setLocale(QLocale('English'))
+            line.setValidator(validator)
+            line.setText(str(self._opts[key]))
+            grid.addWidget(line, row, 1)
+            self._lines[key] = (line, kind)
+            row += 1
+        grid.addWidget(QLabel('Reference of the hiding fraction:', self), row, 0)
+        self.refCombo = QComboBox(self)
+        self.refCombo.addItems(['cap', 'max'])
+        self.refCombo.setCurrentText(self._opts['qlower_ref'])
+        grid.addWidget(self.refCombo, row, 1)
+        row += 1
+        self.gifCheck = QCheckBox('Save one period as GIF:', self)
+        self.gifLine = QLineEdit('animation.gif', self)
+        gifBtn = QPushButton('Browse', self)
+        gifBtn.clicked.connect(self._browse_gif)
+        grid.addWidget(self.gifCheck, row, 0)
+        grid.addWidget(self.gifLine, row, 1)
+        grid.addWidget(gifBtn, row, 2)
+
+        self.buttonBox = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self.buttonBox.accepted.connect(self._get_config)
+        self.buttonBox.rejected.connect(self.reject)
+        vlay = QVBoxLayout()
+        vlay.addLayout(grid)
+        vlay.addWidget(self.buttonBox)
+        self.setLayout(vlay)
+
+    def _browse_gif(self):
+        fname = QFileDialog.getSaveFileName(self, 'Save GIF', self.gifLine.text(), '*.gif')[0]
+        if fname:
+            self.gifLine.setText(fname)
+            self.gifCheck.setChecked(True)
+
+    def _get_config(self):
+        try:
+            for key, (line, kind) in self._lines.items():
+                self._opts[key] = kind(line.text())
+        except ValueError as err:
+            QMessageBox.warning(self, 'Animate', str(err))
+            return
+        self._opts['qlower_ref'] = self.refCombo.currentText()
+        self._gif = self.gifLine.text() if self.gifCheck.isChecked() else None
+        self._okexit = True
+        self.accept()

@@ -27,8 +27,10 @@ from tcdlibx.calc.cube_manip import VecCubeData, VtcdData, cube_parser
 from tcdlibx.graph.helpers import EleMolecule, VibMolecule, filtervecatom, sample_molecular_volume, DEFAULT_PARAMETERS, write_molecule_pov, vdw_boolean_mask
 import tcdlibx.graph.cube_graphvtk as cubetk
 from tcdlibx.gui.dialogs import (
-    SavePngDialog, SavePngSeriesDialog, StreamLineSetupDialog, TCDDialog, QuiverSetupDialog, SaveSceneDialog, ExportPOVDialog, NMConfigDialog, MoleculeConfigDialog
+    SavePngDialog, SavePngSeriesDialog, StreamLineSetupDialog, TCDDialog, QuiverSetupDialog, SaveSceneDialog, ExportPOVDialog, NMConfigDialog, MoleculeConfigDialog, AnimateDialog
 )
+from tcdlibx.gui.vfield_anim_gui import VFieldAnimationMixin
+from tcdlibx.graph.vfield_anim import mode_displacements
 from tcdlibx.io.estp_io import PHYSFACT, get_elemol, get_vibmol
 from tcdlibx.io.jsonio import read_json, write_json
 from tcdlibx.utils.custom_except import NoValidData
@@ -38,7 +40,7 @@ from tcdlibx.utils.vtk_utils import QVTKRenderWindowInteractor, vtk
 # Module configuration
 DEBUG = True
 
-class TCDvis(QMainWindow):
+class TCDvis(VFieldAnimationMixin, QMainWindow):
     """TCD Visualization Application.
     
     A PySide6/VTK-based application for visualizing Transition Current Density (TCD)
@@ -88,6 +90,7 @@ class TCDvis(QMainWindow):
         self._seeds = None
         
         self._default = copy.deepcopy(DEFAULT_PARAMETERS) 
+        self._init_vfield_animation()
 
         self.initUI()
 
@@ -328,6 +331,17 @@ class TCDvis(QMainWindow):
         nomtButton.setStatusTip('remove all VTCD DTM vectors')
         nomtButton.triggered.connect(self.cleartcdmt)
         fileTCDmt.addAction(nomtButton)
+        filevtcd.addSeparator()
+        animButton = QAction(QIcon(''), 'Animate', self)
+        animButton.setStatusTip('Moving arrows of the VTCD while the nuclei vibrate along the mode')
+        animButton.triggered.connect(self.start_vfield_animation)
+        animButton.setEnabled(False)
+        self._menus['vtcd']['anim'] = animButton
+        filevtcd.addAction(animButton)
+        animStopButton = QAction(QIcon(''), 'Stop animation', self)
+        animStopButton.setStatusTip('Stop the VTCD animation')
+        animStopButton.triggered.connect(self.stop_vfield_animation)
+        filevtcd.addAction(animStopButton)
 
     def createBar(self):                
         # buttons
@@ -443,6 +457,7 @@ class TCDvis(QMainWindow):
 
     def _cleanactors(self):
         """Removes all actors from the renderer"""
+        self.stop_vfield_animation()
         # Stop any running animation first
         if self._show_particles:
             self.stop_animation()
@@ -1122,8 +1137,23 @@ class TCDvis(QMainWindow):
         self.stline.setValidator(stval)
         self.message2.setText(f"of {self._nstates}")
 
+    def _anim_source(self):
+        """Dialog and data of the animation of the VTCD of the active normal mode."""
+        if self._moltype != 'vib' or self._activest not in self._fchk.avail_tcd():
+            return None
+        dialog = AnimateDialog(parent=self, opts=self._vfopts, mode=self._activest + 1)
+        dialog.exec()
+        if not dialog._okexit:
+            return None
+        moldata = self._fchk._moldata
+        drdq, omega = mode_displacements(moldata['evec'][self._activest], moldata['atmas'],
+                                         moldata['freq'][self._activest])
+        return (self._fchk.get_tcd(self._activest), self._fchk.atnum, drdq, omega,
+                dialog._opts, dialog._gif)
+
     def _setstate(self):
         self._activest = int(self.stline.text()) - 1
+        self.stop_vfield_animation()
         
         # Stop any running particle animation and reset animation flag
         if self._show_particles:
@@ -1146,6 +1176,7 @@ class TCDvis(QMainWindow):
                     self._menus['etcddtm']['frags'].setEnabled(True)
             elif self._moltype == 'vib':
                 self._menus['vtcd']['dmt'].setEnabled(True)
+                self._menus['vtcd']['anim'].setEnabled(True)
                 # Enable fragment contributions if AIM data and fragments are available
                 if self._fchk._aimdata is not None and self._fchk._frags is not None:
                     self._menus['vtcddtm']['frags'].setEnabled(True)
@@ -1157,6 +1188,7 @@ class TCDvis(QMainWindow):
                 self._menus['etcd']['dmt'].setEnabled(False)
             elif self._moltype == 'vib':
                 self._menus['vtcd']['dmt'].setEnabled(False)
+                self._menus['vtcd']['anim'].setEnabled(False)
         if 'mfpdtm' in self._actors:
             self.showdmt()
         
