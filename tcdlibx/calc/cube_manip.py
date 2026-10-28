@@ -5,15 +5,15 @@ Library to manage the cube file
 import os
 import importlib.util
 import copy
+from collections.abc import Sequence
 from math import ceil
 import numpy as np
 # custom libraries
 from tcdlibx.utils.custom_except import NoValidData
 from tcdlibx.utils.var_tools import angle_between, Poliedron, trilinerarinterpolation
-GPU = importlib.util.find_spec('numba')
+GPU: bool = importlib.util.find_spec('numba') is not None
 if GPU:
     from tcdlibx.calc.numba_linalg_3 import cross3
-    GPU = True
     print('GPU = {}'.format(GPU))
 
 
@@ -94,6 +94,16 @@ class CubeData:
     """
     Object to manage the discrete volumetric data set from a gaussian cube file
     """
+    npts: list[int]
+    loc2wrd: np.ndarray
+    wrd2loc: np.ndarray
+    natoms: int
+    ian: np.ndarray
+    crd: np.ndarray
+    nval: int
+    cube: np.ndarray
+    box: np.ndarray
+
     def __init__(self, origin: 'CubeData | None' = None) -> None:
         if origin is None:
             self.npts = [0, 0, 0]
@@ -163,19 +173,12 @@ class CubeData:
         return the step along the specified axis
         """
         try:
-            axis = int(axis)
-            if axis > 2:
-                raise NoValidData('get_axstep', '{} not valid value: 0, 1, 2 or x, y, z'.format(axis))
+            idx = int(axis)
         except ValueError:
-            if axis == 'x':
-                axis = 0
-            elif axis == 'y':
-                axis = 1
-            elif axis == 'z':
-                axis = 2
-            else:
-                raise NoValidData('get_axstep', '{} not valid value: 0, 1, 2 or x, y, z'.format(axis))
-        return self.loc2wrd[:3, axis]
+            idx = {'x': 0, 'y': 1, 'z': 2}.get(str(axis), -1)
+        if not 0 <= idx <= 2:
+            raise NoValidData('get_axstep', '{} not valid value: 0, 1, 2 or x, y, z'.format(axis))
+        return self.loc2wrd[:3, idx]
 
     def get_axstep_norm(self, axis: int | str) -> float:
         """
@@ -270,12 +273,15 @@ class CubeData:
         the grid
         """
         loc_point = self._wrdtolocal(point)
-        if (loc_point < 0.).any() or (loc_point - np.array(self.npts) > 0).any():
+        if (loc_point < 0.).any() or (loc_point - (np.array(self.npts) - 1) > 0).any():
             raise NoValidData('get_value', 'The point lies outside the grid')
         loc_point = np.round(loc_point, 5)
         # returns the point on the grid if it is on it
         if np.isclose(loc_point, np.round(loc_point), atol=1e-5).all():
-            return self.cube[loc_point.astype(int)]
+            index = self._cubetolinear(np.round(loc_point).astype(int))
+            if self.nval == 1:
+                return self.cube[index]
+            return self.cube[:, index]
         datavox, normpoint = self._getcubeinfo(loc_point)
         return trilinerarinterpolation(datavox['vox_v'], normpoint)
 
@@ -291,16 +297,15 @@ class CubeData:
         """
         Set the cube dataset, consistency checked with npts and nval
         """
-        # BUG accept also list? decide and fix
-        try:
-            dimen = cube_da.shape
-            nptss = self.npts[0] * self.npts[1] * self.npts[2]
-            if not dimen[0] == self.nval or not dimen[1] == nptss:
-                raise NoValidData('set_cube', 'ndarray {}x{} expected, {}x{} provided'.format(self.nval, nptss, dimen[0], dimen[1]))
-        except AttributeError:
+        if not isinstance(cube_da, np.ndarray):
             raise NoValidData('CubeData.set_cube', 'expected np.ndarray')
+        nptss = self.npts[0] * self.npts[1] * self.npts[2]
+        expected = (nptss,) if self.nval == 1 else (self.nval, nptss)
+        if cube_da.shape != expected:
+            raise NoValidData('set_cube', 'ndarray of shape {} expected, {} provided'.format(expected, cube_da.shape))
+        self.cube = cube_da
 
-    def add_atom(self, i_an: int, coord: np.ndarray, index: int) -> None:
+    def add_atom(self, i_an: int, coord: Sequence[float] | np.ndarray, index: int) -> None:
         """
         add an atom number and its coordinate
         """
@@ -337,7 +342,7 @@ class CubeData:
         if (self.npts == other.npts and
                 (self.loc2wrd == other.loc2wrd).all() and
                 (self.ian == other.ian).all() and
-                ((self.crd-other.crd) < 2.e-6).all()):  # and
+                (np.abs(self.crd-other.crd) < 2.e-6).all()):  # and
                 # self.nval == other.nval):
             res = True
 
@@ -436,7 +441,7 @@ class CubeData:
                              [1, 1, 1]])
         loc_point = self._wrdtolocal(center)
         if (loc_point < 0.).any() or (loc_point - np.array(self.npts) > 0).any():
-            raise NoValidData('get_value', 'The point lies outside the grid')
+            raise NoValidData('indexinsphere', 'The point lies outside the grid')
         loc_point = np.round(loc_point, 5)
         # BUG assumed an orthonormal set of coordinate
         # select a rectangular box and then refine
@@ -444,7 +449,7 @@ class CubeData:
         rad_local = np.ceil(np.repeat(radius, 3) * np.abs(np.diag(self.wrd2loc)[:3]))
         # Find the closest voxel
         cube_origin = np.floor(loc_point)
-        deltas = cubrepos - (cube_origin[np.newaxis, :] - cube_origin)
+        deltas = (cube_origin[np.newaxis, :] + cubrepos) - loc_point
         normval = (deltas**2).sum(axis=1)
         clos_voxel = cubrepos[normval.argmin()]+cube_origin
         # Building the box
@@ -489,14 +494,11 @@ class ScalarsCube(CubeData):
     CubeData containing A collection of scalar fields
     """
     def __init__(self, cubedata: CubeData) -> None:
-        try:
-            if not isinstance(cubedata, CubeData):
-                raise NoValidData('ScalarsCubData', 'CubeData object required')
-            CubeData.__init__(self, cubedata)
-            self.labels = [str(x) for x in range(self.nval)]
-            self.centroids = None
-        except NoValidData as err:
-            print("{}:{}".format(err.expression, err.message))
+        if not isinstance(cubedata, CubeData):
+            raise NoValidData('ScalarsCubData', 'CubeData object required')
+        CubeData.__init__(self, cubedata)
+        self.labels = [str(x) for x in range(self.nval)]
+        self.centroids: np.ndarray | None = None
 
     def set_labels(self, labels: list[str]) -> None:
         """
@@ -523,7 +525,7 @@ class ScalarsCube(CubeData):
         """
         TODO
         """
-        if not self.centroids:
+        if self.centroids is None:
             self._calc_centroids()
         return self.centroids
 
@@ -534,13 +536,12 @@ class ScalarsCube(CubeData):
         origin = np.array(origin)
         orth_axis = np.array(orth_axis)
         norm_axis = mynorm(orth_axis)
-        ax_def = np.where(np.abs(1 - norm_axis) < 1e-5)
+        ax_def = np.where(np.abs(1 - np.abs(norm_axis)) < 1e-5)
         if ax_def[0].size:
             it0 = int(ax_def[0][0])
             res = self._integrate_plane_fix(it0)
             if (np.abs(origin[it0]) > 1e-5):
-                for item in res[0]:
-                    item -= origin[it0]
+                res[0] = [item - origin[it0] for item in res[0]]
             if orth_axis[it0] < 0:
                 res = [list(reversed(res[0])),
                        list(reversed(res[1]))]
@@ -550,7 +551,7 @@ class ScalarsCube(CubeData):
         # sistemare la selezione del
 
     def _integrate_plane_fix(self, orth_axis: int) -> list[list]:
-        res = [[], []]
+        res: list[list] = [[], []]
         it0 = int(orth_axis)
         i_one = 1 >> it0
         i_two = 2 - (1 >> (2 - it0))
@@ -636,7 +637,7 @@ class ScalarsCube(CubeData):
                            + (self.npts[1]-1) * self.get_axstep(1))
 
         verticesbox = np.array(verticesbox)
-        t_tmp = np.einsum('j,ij->i', z_prime, verticesbox)
+        t_tmp = np.einsum('j,ij->i', z_prime, verticesbox - start_p)
         t_zprime_min = t_tmp.min()
         t_zprime_max = t_tmp.max()
         del t_tmp
@@ -649,7 +650,7 @@ class ScalarsCube(CubeData):
         if i_zprime_min > i_zprime_max:
             i_zprime_min, i_zprime_max = i_zprime_max, i_zprime_min
 
-        res = [[], []]
+        res: list[list] = [[], []]
         # Iterates along the Z' direction
         for iter_zprime in range(i_zprime_min, i_zprime_max + 1):
             # Sum of the volume values sampled from the X'Y' plane
@@ -743,13 +744,10 @@ class VecCubeData(CubeData):
     CubeData containing Vector fields (3d vec)
     """
     def __init__(self, cubedata: CubeData) -> None:
-        try:
-            if not cubedata.cube.shape[0] == 3:
-                raise NoValidData('VecCubeData', 'Not vec field data set')
-            CubeData.__init__(self, cubedata)
-            self._getminmax()
-        except NoValidData as err:
-            print("{}:{}".format(err.expression, err.message))
+        if not cubedata.cube.shape[0] == 3:
+            raise NoValidData('VecCubeData', 'Not vec field data set')
+        CubeData.__init__(self, cubedata)
+        self._getminmax()
 
     def _getminmax(self) -> None:
         normvals = np.sqrt(np.einsum('ij,ij->j', self.cube, self.cube))
@@ -787,7 +785,7 @@ class VecCubeData(CubeData):
             vec_1 = self.cube
             box_1 = self.box
         if origin is not None:
-            box_1 -= origin[:, np.newaxis]
+            box_1 = box_1 - origin[:, np.newaxis]  # no in-place: box_1 may alias self.box
         if GPU:
             res = np.zeros_like(vec_1)
             for i_th in range(vec_1.shape[1]):
@@ -817,7 +815,7 @@ class VecCubeData(CubeData):
             vec = np.array(vec)
             # BUG check if are floats!!
             if vec.shape != (3,):
-                raise NoValidData(vec, 'vec must be a 3d vector')
+                raise NoValidData('VecCubeData.proj_on_vec', 'vec must be a 3d vector')
         if rot:
             mat = self._calc_rot()
         else:
@@ -849,15 +847,11 @@ class VtcdData(VecCubeData):
     CubeData containing Vector fields from vtcd
     """
     def __init__(self, cubedata: CubeData, ithevec: np.ndarray, nu_freq: float) -> None:
-        try:
-            if not cubedata.cube.shape[0] == 3:
-                raise NoValidData('VtcdData', 'Not vec field data set')
-            VecCubeData.__init__(self, cubedata)
-            self.evec = ithevec
-            self.energy = nu_freq
-
-        except NoValidData as err:
-            print("{}:{}".format(err.expression, err.message))
+        if not cubedata.cube.shape[0] == 3:
+            raise NoValidData('VtcdData', 'Not vec field data set')
+        VecCubeData.__init__(self, cubedata)
+        self.evec = ithevec
+        self.energy = nu_freq
 
     def mu_integrate(self, mask: np.ndarray | None = None) -> np.ndarray:
         """integrate vector field in all space"""
@@ -935,7 +929,8 @@ class VtcdData(VecCubeData):
         # print(tens)
         return pre_fc * res
 
-    def proj_on_vec(self, typ: str = 'moe', nucl: bool = False, cube: bool = False) -> np.ndarray | CubeData:
+    def proj_on_vec(self, typ: str = 'moe', nucl: bool = False,  # pyright: ignore[reportIncompatibleMethodOverride]
+                    cube: bool = False) -> np.ndarray | CubeData:
         """
         compute the scalar field, projecting the vector field
         on the electric dipole transition moment
@@ -974,8 +969,8 @@ class VtcdData(VecCubeData):
         else:
             raise NotImplementedError
         # *-1 is to match the direction of the vectors in the cube
-        res = super(VtcdData, self).proj_on_vec(vec=vec*-1, rot=rot, cube=cube)
-        if cube:
+        res = super().proj_on_vec(vec=vec*-1, rot=rot, cube=cube)
+        if isinstance(res, CubeData):
             res.cube /= pre_fc
         else:
             res /= pre_fc
@@ -1004,42 +999,41 @@ class AimCubeData(VecCubeData):
             raise NoValidData("AimCubeData", "Not valid data type")
         self.mask = mask.cube
         self.basin = self.__get_atom_voxel()
-        self._frag = None
+        self._frag: list[tuple[int, ...]] | None = None
         if not self.box.size:
             self.make_box()
 
-    def __get_atom_voxel(self) -> list[int]:
+    def __get_atom_voxel(self) -> list[float]:
         """
         define a dictionary entry beetween the actractora and the atoms
         """
         atom_multimap = []
-        total_voxels = self.npts[0] * self.npts[1] * self.npts[2]
-        
+        loc_atoms = np.dot(np.linalg.inv(self.loc2wrd),
+                           np.append(self.crd, np.ones((self.natoms, 1)), axis=1).T)[:3].T
+
         for i_th in range(self.natoms):
-            local_atom = [int(x) for x in np.dot(np.linalg.inv(self.loc2wrd),
-                                                 np.append(self.crd[i_th], 1))[:3]]
-            index = local_atom[0]*self.npts[1]*self.npts[2] +\
-                    local_atom[1]*self.npts[2] + local_atom[2]
-                    
-            # Add bounds checking to prevent IndexError
-            if index < 0 or index >= total_voxels:
-                print(f"Warning: Atom {i_th} index {index} is out of bounds [0, {total_voxels-1}]")
+            local_atom = [int(x) for x in np.round(loc_atoms[i_th])]
+
+            # Per-axis check: a flat-index check lets an out-of-range axis wrap
+            if any(not 0 <= local_atom[ax] < self.npts[ax] for ax in range(3)):
+                print(f"Warning: Atom {i_th} is outside the grid")
                 print(f"  local_atom coords: {local_atom}")
                 print(f"  world coords: {self.crd[i_th]}")
                 print(f"  npts: {self.npts}")
-                # Use a default value or skip this atom
-                atom_multimap.append(0)  # Default to basin 0
+                # Out-of-grid atom: NaN matches no voxel
+                atom_multimap.append(np.nan)
                 continue
+            index = self._cubetolinear(np.array(local_atom))
                 
             # Additional check for mask array dimensions
             if hasattr(self.mask, 'shape'):
                 if self.mask.ndim == 1 and index >= len(self.mask):
                     print(f"Warning: Index {index} exceeds mask length {len(self.mask)}")
-                    atom_multimap.append(0)
+                    atom_multimap.append(np.nan)
                     continue
                 elif self.mask.ndim == 2 and index >= self.mask.shape[1]:
                     print(f"Warning: Index {index} exceeds mask second dimension {self.mask.shape[1]}")
-                    atom_multimap.append(0)
+                    atom_multimap.append(np.nan)
                     continue
                     
             atom_multimap.append(self.mask[index])
@@ -1058,29 +1052,19 @@ class AimCubeData(VecCubeData):
         """
         # shift the indeces
         # sfrags = [[x-1 for x in item] for item in frags]
-        # no shift, handled outside
-        sfrags = frags
+        # no shift, handled outside; copy so the caller's list is not modified
+        sfrags = [list(item) for item in frags]
         tmp_full = [item for sublist in sfrags for item in sublist]
-        natms = len(tmp_full)
-        unic_atms = set(tmp_full)
-        lunic_atms = len(unic_atms)
-        if natms != lunic_atms:
+        if len(tmp_full) != len(set(tmp_full)):
             print("WARNING: some atoms present more than one fragments")
-        try:
-            unic_atms = np.array(list(unic_atms))
-            if (unic_atms < 0).any() or (unic_atms >= self.natoms).any():
-                self._frag = None
-                print(unic_atms)
-                print(sfrags)
-                print(frags)
-                raise ValueError
-            else:
-                excluded = list(set(range(self.natoms)) - set(tmp_full))
-                if excluded:
-                    sfrags.append(excluded)
-                self._frag = [tuple(x) for x in sfrags]
-        except Exception as err:
-            print(err)
+        if any(atm < 0 or atm >= self.natoms for atm in tmp_full):
+            self._frag = None
+            raise NoValidData('set_fragments',
+                              'atom index out of range [0, {}]'.format(self.natoms - 1))
+        excluded = sorted(set(range(self.natoms)) - set(tmp_full))
+        if excluded:
+            sfrags.append(excluded)
+        self._frag = [tuple(x) for x in sfrags]
 
     def get_atom_contribution(self, atom_id: int) -> tuple[np.ndarray, np.ndarray]:
         """
@@ -1128,7 +1112,7 @@ class AimCubeData(VecCubeData):
         """
         if hasattr(self, 'evec') and hasattr(self, 'energy'):
             # This is VTCD data, use specialized integration
-            integrated = self.integrate(mask=mask) * -1 
+            integrated = self.integrate(mask=mask) * -2
             return integrated
         else:
             # Regular vector field integration
@@ -1152,59 +1136,17 @@ class AimCubeData(VecCubeData):
     def get_frags_contribution(self) -> dict[str, list[np.ndarray]]:
         if self._frag is None:
             raise NoValidData('get_frags_contribution', 'Fragments not set')
-        
-        print("\n=== DEBUG: Fragment Contribution Analysis ===")
-        
-        res = {'int': [],
-               'rot': []}
-        
-        # Debug: Compute total integration without fragments for comparison
-        total_int = self.mu_integrate()
-        total_rot = self.mag_integrate()
-        print("Total integration (no fragments):")
-        print(f"  Electric: {total_int}")
-        print(f"  Magnetic: {total_rot}")
-        print()
-        
-        # Process each fragment
-        for i, frg in enumerate(self._frag):
+
+        res: dict[str, list[np.ndarray]] = {'int': [], 'rot': []}
+        for frg in self._frag:
             mask_tmp = np.full(self.mask.shape, False)
             if isinstance(frg, tuple):
-                atoms_in_frag = list(frg)
                 for atom in frg:
                     mask_tmp += self.get_atom_mask(atom)
             else:
-                atoms_in_frag = [frg]
                 mask_tmp = self.get_atom_mask(frg)
-            
-            frag_int = self.mu_integrate(mask_tmp)
-            frag_rot = self.mag_integrate(mask_tmp)
-            
-            res['int'].append(frag_int)
-            res['rot'].append(frag_rot)
-            
-            # Debug: Print each fragment's contribution
-            print(f"Fragment {i+1} (atoms {[a+1 for a in atoms_in_frag]}):")
-            print(f"  Electric: {frag_int}")
-            print(f"  Magnetic: {frag_rot}")
-        
-        # Debug: Compute and display sum of fragments
-        sum_int = np.sum(res['int'], axis=0)
-        sum_rot = np.sum(res['rot'], axis=0)
-        print()
-        print("Sum of all fragments:")
-        print(f"  Electric: {sum_int}")
-        print(f"  Magnetic: {sum_rot}")
-        
-        # Debug: Show difference between total and sum of fragments
-        diff_int = total_int - sum_int
-        diff_rot = total_rot - sum_rot
-        print()
-        print("Difference (Total - Sum of fragments):")
-        print(f"  Electric: {diff_int}")
-        print(f"  Magnetic: {diff_rot}")
-        print("============================================\n")
-        
+            res['int'].append(self.mu_integrate(mask_tmp))
+            res['rot'].append(self.mag_integrate(mask_tmp))
         return res
 
     def get_frag_isosurf(self) -> CubeData:
@@ -1230,8 +1172,8 @@ class AimCubeData(VecCubeData):
             for indx in mask_indices:
                 xyz = self._lineartocube(indx)
                 if (xyz[0] == 0 or xyz[1] == 0 or xyz[2] == 0 or 
-                   xyz[0] == self.npts[0] or xyz[1] == self.npts[1] or
-                   xyz[2] == self.npts[2]):
+                   xyz[0] == self.npts[0] - 1 or xyz[1] == self.npts[1] - 1 or
+                   xyz[2] == self.npts[2] - 1):
                     mask_brd[i, indx] = 1
                 else:
                     xyz_rel = relpos + np.array(xyz)
@@ -1289,49 +1231,42 @@ def print_cube(cubdata: 'CubeData', fname: str = 'cubefile.cube',
     param gau_style: add a \\n after each z index end
     """
     outfile = '{}'.format(fname)
-    fout = open(outfile, 'w', encoding='utf-8')
-    fout.write(' Cube generated with tcdlib\n')
-    fout.write(' {}\n'.format(comment))
-    fmt_2 = '{:5d}{b[0]:12.6f}{b[1]:12.6f}{b[2]:12.6f}'
-    fmt_3 = '{a:5d}{a:12.6f}{b[0]:12.6f}{b[1]:12.6f}{b[2]:12.6f}\n'
-    fout.write(fmt_2.format(cubdata.natoms,
-                            b=cubdata.loc2wrd[:3, 3])+'{:5d}\n'.format(cubdata.nval))
-    for i in range(3):
-        fout.write(fmt_2.format(cubdata.npts[i],
-                                b=cubdata.loc2wrd[:3, i])+'\n')
-    npts = cubdata.npts[0] * cubdata.npts[1] * cubdata.npts[2]
-    for j in range(cubdata.natoms):
-        fout.write(fmt_3.format(a=int(cubdata.ian[j]),
-                                b=cubdata.crd[j, :]))
+    # validate before opening so a failure does not leave a truncated file
     if vec_pr is None:
         vec_pr = cubdata.cube
     elif isinstance(vec_pr, np.ndarray):
-        if vec_pr.shape[0] != npts:
+        if vec_pr.shape != cubdata.cube.shape:
             raise NoValidData('print_cube',
-                              '{} points expected, {} present in the array'.format(npts, vec_pr.shape[0]))
-        elif vec_pr.shape != cubdata.cube.shape:
-            raise NoValidData('print_cube',
-                              'vec_pr and cubdata.cube have different number of Nval. {} expected.'.format(cubdata.nval))
+                              'array of shape {} expected, {} provided'.format(cubdata.cube.shape, vec_pr.shape))
     else:
         raise NoValidData('print_cube', 'ndarray expected')
     # Check if it is a one dimension array
-    try:
-        vec_pr.shape[1]
-    except IndexError:
+    if vec_pr.ndim < 2:
         vec_pr = np.expand_dims(vec_pr, axis=1)
-    count = 0
 
-    for i in range(vec_pr.shape[1]):
-        for j in range(vec_pr.shape[0]):
-            count += 1
-            fout.write(' {:12.5E}'.format(vec_pr[j, i]))
-            if count % 6 == 0:
-                fout.write("\n")
-            elif gau_style and count % cubdata.npts[2] == 0:
-                fout.write("\n")
-                count = 0
-
-    fout.close()
+    fmt_2 = '{:5d}{b[0]:12.6f}{b[1]:12.6f}{b[2]:12.6f}'
+    fmt_3 = '{a:5d}{a:12.6f}{b[0]:12.6f}{b[1]:12.6f}{b[2]:12.6f}\n'
+    with open(outfile, 'w', encoding='utf-8') as fout:
+        fout.write(' Cube generated with tcdlib\n')
+        fout.write(' {}\n'.format(comment))
+        fout.write(fmt_2.format(cubdata.natoms,
+                                b=cubdata.loc2wrd[:3, 3])+'{:5d}\n'.format(cubdata.nval))
+        for i in range(3):
+            fout.write(fmt_2.format(cubdata.npts[i],
+                                    b=cubdata.loc2wrd[:3, i])+'\n')
+        for j in range(cubdata.natoms):
+            fout.write(fmt_3.format(a=int(cubdata.ian[j]),
+                                    b=cubdata.crd[j, :]))
+        count = 0
+        for i in range(vec_pr.shape[1]):
+            for j in range(vec_pr.shape[0]):
+                count += 1
+                fout.write(' {:12.5E}'.format(vec_pr[j, i]))
+                if count % 6 == 0:
+                    fout.write("\n")
+                elif gau_style and count % cubdata.npts[2] == 0:
+                    fout.write("\n")
+                    count = 0
 
 
 # def print_vec_incube(fname, vect1, vect2):
@@ -1390,18 +1325,19 @@ def cube_parser(cubfile: str,
             data_tmp.add_atom(int(token[0]), [float(x) for x in token[2:]], i_th)
         if mo_cube:
             nlines = ceil((data_tmp.nval+1)/10)
-            data_tmp = ScalarsCube(data_tmp)
+            scalars = ScalarsCube(data_tmp)
             labels = []
             for i_th in range(nlines):
                 line = fi_le.readline()
                 labels.extend([str(x) for x in line.split()])
-            data_tmp.set_labels(labels[1:])
+            scalars.set_labels(labels[1:])
+            data_tmp = scalars
 
         content = fi_le.readlines()
-    vec_num = []
+    values: list[float] = []
     for line in content:
-        vec_num.extend([float(x) for x in line.split()])
-    vec_num = np.array(vec_num)
+        values.extend([float(x) for x in line.split()])
+    vec_num = np.array(values)
     if nval > 1:
         vec_num.resize(int(vec_num.shape[0] / nval), nval)
         vec_num = vec_num.transpose()

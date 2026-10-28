@@ -27,7 +27,7 @@ from tcdlibx.calc.cube_manip import VecCubeData, VtcdData, cube_parser
 from tcdlibx.graph.helpers import EleMolecule, VibMolecule, filtervecatom, sample_molecular_volume, DEFAULT_PARAMETERS, write_molecule_pov, vdw_boolean_mask
 import tcdlibx.graph.cube_graphvtk as cubetk
 from tcdlibx.gui.dialogs import (
-    SavePngDialog, SavePngSeriesDialog, StreamLineSetupDialog, TCDDialog, QuiverSetupDialog, SaveSceneDialog, ExportPOVDialog, NMConfigDialog, MoleculeConfigDialog
+    SavePngDialog, SavePngSeriesDialog, StreamLineSetupDialog, TCDDialog, QuiverSetupDialog, SaveSceneDialog, ExportPOVDialog, NMConfigDialog, MoleculeConfigDialog, TensorSetupDialog
 )
 from tcdlibx.io.estp_io import PHYSFACT, get_elemol, get_vibmol
 from tcdlibx.io.jsonio import read_json, write_json
@@ -194,6 +194,48 @@ class TCDvis(QMainWindow):
         nmConfig.setEnabled(True)
         nmmenu.addAction(nmConfig)
         self._menus['mol']['nm']['config'] = nmConfig
+        # Tensor visualization
+        tenmenu = fileMol.addMenu('Tensors Vis.')
+        tenmenu.setEnabled(False)
+        self._menus['mol']['ten'] = {}
+        self._menus['mol']['ten']['menu'] = tenmenu
+        aptButton = QAction(QIcon(''), 'APT', self)
+        aptButton.setStatusTip('Display the atomic polar tensors from fchk')
+        aptButton.setCheckable(True)
+        aptButton.triggered.connect(self.showapt)
+        tenmenu.addAction(aptButton)
+        self._menus['mol']['ten']['apt'] = aptButton
+        aatButton = QAction(QIcon(''), 'AAT', self)
+        aatButton.setStatusTip('Display the atomic axial tensors from fchk')
+        aatButton.setCheckable(True)
+        aatButton.triggered.connect(self.showaat)
+        tenmenu.addAction(aatButton)
+        self._menus['mol']['ten']['aat'] = aatButton
+        # New stuff
+        aptsurButton = QAction(QIcon(''), 'APT Surface', self)
+        aptsurButton.setStatusTip('Display the APT surface from unit displacement on sphere')
+        aptsurButton.setCheckable(True)
+        aptsurButton.triggered.connect(self.showaptsurf)
+        tenmenu.addAction(aptsurButton)
+        self._menus['mol']['ten']['aptsurf'] = aptsurButton
+        aatsurButton = QAction(QIcon(''), 'AAT Surface', self)
+        aatsurButton.setStatusTip('Display the AAT surface from unit displacement on sphere')
+        aatsurButton.setCheckable(True)
+        aatsurButton.triggered.connect(self.showaatsurf)
+        tenmenu.addAction(aatsurButton)
+        self._menus['mol']['ten']['aatsurf'] = aatsurButton
+        # Settings and clear
+        settButton = QAction(QIcon(''), 'Settings', self)
+        settButton.setStatusTip('Open tensor settings')
+        settButton.triggered.connect(self.tensor_settings)
+        tenmenu.addAction(settButton)
+        self._menus['mol']['ten']['settings'] = settButton
+        nomtButton = QAction(QIcon(''), 'Clear', self)
+        nomtButton.setStatusTip('remove all tensor vectors')
+        nomtButton.triggered.connect(self.cleartens)
+        tenmenu.addAction(nomtButton)
+        self._menus['mol']['ten']['clear'] = nomtButton
+
         # Ele. DMT
         fileEDmt = fileMol.addMenu('Ele. DTMs')
         fileEDmt.setEnabled(False) 
@@ -707,7 +749,11 @@ class TCDvis(QMainWindow):
     def _enable_molmenu(self):
         for val in self._menus['mol']:
             #print(val)
-            if not val == 'nm' and 'dmt' not in val:
+            if 'dmt' in val:
+                continue
+            if isinstance(self._menus['mol'][val], dict):
+                self._menus['mol'][val]['menu'].setEnabled(True)
+            else:
                 self._menus['mol'][val].setEnabled(True)
                 
         # Enable molecule-type specific menus
@@ -738,6 +784,11 @@ class TCDvis(QMainWindow):
             self._menus['vtcd'][val].setEnabled(False)
         self._menus['vtcddtm']['frags'].setEnabled(False)
 
+    def _ensure_default_mspeed(self):
+        """Set the streamline terminal speed shared by showtcd and the setup dialog."""
+        if self._default["vfield"]["mspeed"] is None:
+            self._default["vfield"]["mspeed"] = self._fchk.get_tcd(self._activest)._maxnorm/1e4
+
     def _fieldstp(self):
         current_prop = self.prop.currentText().lower()
 
@@ -757,8 +808,7 @@ class TCDvis(QMainWindow):
         
         if current_prop == "streamlines":
             # Handle streamlines setup dialog
-            if self._default["vfield"]["mspeed"] is None:
-                self._default["vfield"]["mspeed"] = self._fchk.get_tcd(self._activest)._maxnorm/1e4
+            self._ensure_default_mspeed()
             fieldprm = StreamLineSetupDialog(vfmax=self._default["vfield"]["vfmax"],
                                              vfmin=self._default["vfield"]["vfmin"],
                                              mspeed=self._default["vfield"]["mspeed"],
@@ -1224,6 +1274,135 @@ class TCDvis(QMainWindow):
             self.ren.AddActor(self._actors['mfpdtm'].actor)
         self._updatereder()
 
+    def _showtensors(self, ttype="apt"):
+        self.cleartens(key=ttype)
+        self._actors['tensor'] = cubetk.draw_molecular_tensors(
+            self._fchk,
+            tensor_type=ttype,
+            tensor_level=self._default['tensor']['tensor_level'],
+            sphere_radius=self._default['tensor']['sphere_radius'],
+            nb_sphere_samples=self._default['tensor']['nb_sphere_samples'],
+            vector_scale=self._default['tensor']['vector_scale'],
+            opacity=self._default['tensor']['opacity'],
+            color_scheme=self._default['tensor']['color_scheme'],
+            atom_filter=self._default['tensor']['atom_filter'],
+            frag_filter=self._default['tensor']['frag_filter'],
+            show_spheres=self._default['tensor']['show_spheres']
+        )
+        self.ren.AddActor(self._actors['tensor'].actor)
+        self._updatereder()
+
+    def showapt(self):
+        if not self._menus['mol']['ten']['apt'].isChecked():
+            self.cleartens(key='apt')
+        else:
+            self._showtensors(ttype='apt')
+
+    def showaat(self):
+        if not self._menus['mol']['ten']['aat'].isChecked():
+            self.cleartens(key='aat')
+        else:
+            self._showtensors(ttype='aat')
+
+    def _showtenssurf(self, ttype="apt"):
+        # Use the correct surface key (aptsurf/aatsurf) instead of just ttype (apt/aat)
+        surface_key = ttype + 'surf'
+        self.cleartens(key=surface_key)
+        self._actors['tensor'] = cubetk.draw_molecular_tensor_surface(
+            self._fchk,
+            tensor_type=ttype,
+            tensor_level=self._default['tensor']['tensor_level'],
+            sphere_radius=self._default['tensor']['sphere_radius'],
+            nb_sphere_samples=self._default['tensor']['nb_sphere_surface'],
+            surface_scale=self._default['tensor']['surface_scale'],
+            opacity=self._default['tensor']['opacity'],
+            color_scheme=self._default['tensor']['surf_color_scheme'],
+            atom_filter=self._default['tensor']['atom_filter'],
+            frag_filter=self._default['tensor']['frag_filter'],
+        )
+        self.ren.AddActor(self._actors['tensor'].actor)
+        self._updatereder()
+
+    def showaptsurf(self):
+        if not self._menus['mol']['ten']['aptsurf'].isChecked():
+            self.cleartens(key='aptsurf')
+        else:
+            self._showtenssurf(ttype='apt')
+    
+    def showaatsurf(self):
+        if not self._menus['mol']['ten']['aatsurf'].isChecked():
+            self.cleartens(key='aatsurf')
+        else:
+            self._showtenssurf(ttype='aat')
+
+    def tensor_settings(self):
+        # Convert atom_filter list to comma-separated string for the dialog
+        atom_filter_str = None
+        if self._default['tensor']['atom_filter'] is not None:
+            atom_filter_str = ','.join(self._default['tensor']['atom_filter'])
+        
+        # Number of fragments currently loaded (0 disables the fragment filter UI)
+        nfrags = self._fchk.nfrags if self._fchk is not None else 0
+
+        tensprm = TensorSetupDialog(
+            sphere_radius=self._default['tensor']['sphere_radius'],
+            nb_sphere_samples=self._default['tensor']['nb_sphere_samples'],
+            nb_sphere_surface=self._default['tensor']['nb_sphere_surface'],
+            vector_scale=self._default['tensor']['vector_scale'],
+            surface_scale=self._default['tensor']['surface_scale'],
+            opacity=self._default['tensor']['opacity'],
+            color_scheme=self._default['tensor']['color_scheme'],
+            surf_color_scheme=self._default['tensor']['surf_color_scheme'],
+            atom_filter=atom_filter_str,
+            show_spheres=self._default['tensor']['show_spheres'],
+            tensor_level=self._default['tensor']['tensor_level'],
+            nfrags=nfrags,
+            frag_filter=self._default['tensor']['frag_filter']
+        )
+        tensprm.exec()
+        # Update the default values
+        self._default['tensor']['sphere_radius'] = tensprm.sphere_radius
+        self._default['tensor']['nb_sphere_samples'] = tensprm.nb_sphere_samples
+        self._default['tensor']['nb_sphere_surface'] = tensprm.nb_sphere_surface
+        self._default['tensor']['vector_scale'] = tensprm.vector_scale
+        self._default['tensor']['surface_scale'] = tensprm.surface_scale
+        self._default['tensor']['opacity'] = tensprm.opacity
+        self._default['tensor']['color_scheme'] = tensprm.color_scheme
+        self._default['tensor']['surf_color_scheme'] = tensprm.surf_color_scheme
+        self._default['tensor']['atom_filter'] = tensprm.atom_filter
+        self._default['tensor']['show_spheres'] = tensprm.show_spheres
+        self._default['tensor']['tensor_level'] = tensprm.tensor_level
+        self._default['tensor']['frag_filter'] = tensprm.frag_filter
+        
+        if 'tensor' in self._actors:
+            self.ren.RemoveActor(self._actors['tensor'].actor)
+            self._actors.pop('tensor')
+            # Check and update tensor vectors (apt/aat)
+            if self._menus['mol']['ten']['apt'].isChecked():
+                self._showtensors(ttype='apt')
+            elif self._menus['mol']['ten']['aat'].isChecked():
+                self._showtensors(ttype='aat')
+            # Check and update tensor surfaces (aptsurf/aatsurf)
+            elif self._menus['mol']['ten']['aptsurf'].isChecked():
+                self._showtenssurf(ttype='apt')
+            elif self._menus['mol']['ten']['aatsurf'].isChecked():
+                self._showtenssurf(ttype='aat')
+
+
+    def cleartens(self, key=None):
+        if 'tensor' in self._actors:
+            self.ren.RemoveActor(self._actors['tensor'].actor)
+            self._actors.pop('tensor')
+        if key is None:
+            for key in self._menus['mol']['ten']:
+                if key != 'menu' and key != 'settings':
+                    self._menus['mol']['ten'][key].setChecked(False)
+        else:
+            for keym in self._menus['mol']['ten']:
+                if keym != 'menu' and keym != key and keym != 'settings':
+                    self._menus['mol']['ten'][keym].setChecked(False)
+        self._updatereder()
+
     def showtcdmt(self):
         # Controllare quelli checked e mostrarli
         # crd = np.self._fchk.crd
@@ -1316,6 +1495,7 @@ class TCDvis(QMainWindow):
         tmp_iso = [-self._default['isoval']['iso'],
                    self._default['isoval']['iso']]
         if prop_cur == "streamlines":
+            self._ensure_default_mspeed()
             if self._seeds is None:
                 if self._default["vfield"]["sampling_method"] == "ellipsoid":
                     self._seeds = self._fchk.sample_ellipse_space(self._default["vfield"]["npoints"], scale=self._default["vfield"]["scalellipse"])

@@ -1144,6 +1144,324 @@ class QuiverSetupDialog(QDialog, _ClipPlaneMixin):
         self._update_clipping_toggle(is_enabled)
 
 
+class TensorSetupDialog(QDialog):
+    """Dialog for setting up tensor visualization parameters
+
+    Args:
+        QDialog: Qt dialog base class
+    """
+
+    def __init__(self,
+                 sphere_radius: float = 0.5,
+                 nb_sphere_samples: int = 50,
+                 nb_sphere_surface: int = 250,
+                 vector_scale: float = 2.0,
+                 surface_scale: float = 1.0,
+                 opacity: float = 0.8,
+                 color_scheme: str = 'weight_mag',
+                 surf_color_scheme: str = 'weight_mag',
+                 atom_filter: tp.Optional[str] = None,
+                 show_spheres: bool = False,
+                 tensor_level: str = 'tot',
+                 nfrags: int = 0,
+                 frag_filter: tp.Optional[tp.List[int]] = None,
+                 parent: tp.Optional[tp.Union[QDialog, None]] = None) -> None:
+        """Initialize the tensor setup dialog.
+
+        Args:
+            sphere_radius: Radius of the visualization spheres
+            nb_sphere_samples: Number of fibonacci samples on each sphere for vectors
+            nb_sphere_surface: Number of fibonacci samples on each sphere for surfaces
+            vector_scale: Scale factor for the vectors
+            surface_scale: Scale factor for the surfaces
+            opacity: Opacity of the visualization
+            color_scheme: Color scheme for vectors ('magnitude', 'weight_mag', 'uniform')
+            surf_color_scheme: Color scheme for surfaces ('magnitude', 'weight_mag', 'uniform', 'signed')
+            atom_filter: Comma-separated atomic symbols to filter (e.g., "C,N,O")
+            show_spheres: Whether to show pale yellow spheres at tensor positions
+            tensor_level: Contribution to visualize ('tot', 'ele', or 'nuc')
+            nfrags: Number of fragments currently loaded (0 if none). Enables the
+                fragment filter controls when greater than zero.
+            frag_filter: Initial list of fragment indices to pre-fill the fragment
+                filter (only used when nfrags > 0)
+            parent: Parent dialog (optional)
+        """
+        super().__init__(parent)
+        
+        # Store initial values
+        self._sphere_radius = sphere_radius
+        self._nb_sphere_samples = nb_sphere_samples
+        self._nb_sphere_surface = nb_sphere_surface
+        self._vector_scale = vector_scale
+        self._surface_scale = surface_scale
+        self._opacity = opacity
+        self._color_scheme = color_scheme
+        self._surf_color_scheme = surf_color_scheme
+        self._atom_filter = atom_filter
+        self._show_spheres = show_spheres
+        self._tensor_level = tensor_level
+        self._nfrags = nfrags
+        self._use_frags = nfrags > 0 and bool(frag_filter)
+        self._frag_filter_str = ','.join(str(i + 1) for i in frag_filter) if frag_filter else None
+        
+        self.setWindowTitle("Tensor Visualization Setup")
+        
+        # Main layout
+        self.vlay = QVBoxLayout()
+        grid = QGridLayout()
+        self.vlay.addLayout(grid)
+        
+        # Sphere radius
+        radius_valid = QDoubleValidator()
+        radius_valid.setLocale(QLocale('English'))
+        radius_valid.setRange(0.1, 5.0)
+        self._radius_line = EditDoubleLine("Sphere radius", sphere_radius, radius_valid)
+        grid.addLayout(self._radius_line._hlay, 0, 0)
+        
+        # Number of sphere samples for vectors
+        samples_valid = QIntValidator()
+        samples_valid.setLocale(QLocale('English'))
+        samples_valid.setRange(10, 200)
+        self._samples_line = EditIntLine("Number of sphere samples (vectors)", nb_sphere_samples, samples_valid)
+        grid.addLayout(self._samples_line._hlay, 1, 0)
+        
+        # Number of sphere samples for surfaces
+        surface_samples_valid = QIntValidator()
+        surface_samples_valid.setLocale(QLocale('English'))
+        surface_samples_valid.setRange(50, 500)
+        self._surface_samples_line = EditIntLine("Number of sphere samples (surfaces)", nb_sphere_surface, surface_samples_valid)
+        grid.addLayout(self._surface_samples_line._hlay, 2, 0)
+        
+        # Vector scale
+        scale_valid = QDoubleValidator()
+        scale_valid.setLocale(QLocale('English'))
+        scale_valid.setRange(0.1, 20.0)
+        self._scale_line = EditDoubleLine("Vector scale factor", vector_scale, scale_valid)
+        grid.addLayout(self._scale_line._hlay, 3, 0)
+        
+        # Surface scale
+        surface_scale_valid = QDoubleValidator()
+        surface_scale_valid.setLocale(QLocale('English'))
+        surface_scale_valid.setRange(0.1, 5.0)
+        self._surface_scale_line = EditDoubleLine("Surface scale factor", surface_scale, surface_scale_valid)
+        grid.addLayout(self._surface_scale_line._hlay, 4, 0)
+        
+        # Opacity
+        opacity_valid = QDoubleValidator()
+        opacity_valid.setLocale(QLocale('English'))
+        opacity_valid.setRange(0.1, 1.0)
+        self._opacity_line = EditDoubleLine("Opacity", opacity, opacity_valid)
+        grid.addLayout(self._opacity_line._hlay, 5, 0)
+        
+        # Color scheme for vectors
+        color_label = QLabel("Vector color scheme:")
+        self._color_combo = QComboBox()
+        self._color_combo.addItems(['magnitude', 'weight_mag', 'uniform'])
+        self._color_combo.setCurrentText(color_scheme)
+        self._color_combo.currentTextChanged.connect(self._setcolorscheme)
+        
+        color_hlay = QHBoxLayout()
+        color_hlay.addWidget(color_label)
+        color_hlay.addWidget(self._color_combo)
+        grid.addLayout(color_hlay, 6, 0)
+        
+        # Color scheme for surfaces
+        surf_color_label = QLabel("Surface color scheme:")
+        self._surf_color_combo = QComboBox()
+        self._surf_color_combo.addItems(['magnitude', 'weight_mag', 'uniform', 'signed'])
+        self._surf_color_combo.setCurrentText(surf_color_scheme)
+        self._surf_color_combo.currentTextChanged.connect(self._setsurfcolorscheme)
+        
+        surf_color_hlay = QHBoxLayout()
+        surf_color_hlay.addWidget(surf_color_label)
+        surf_color_hlay.addWidget(self._surf_color_combo)
+        grid.addLayout(surf_color_hlay, 7, 0)
+        
+        # Atom filter
+        filter_label = QLabel("Atom filter (comma-separated):")
+        self._filter_line = QLineEdit()
+        self._filter_line.setPlaceholderText("e.g., C,N,O (leave empty for all atoms)")
+        if atom_filter:
+            self._filter_line.setText(atom_filter)
+        self._filter_line.textChanged.connect(self._setatomfilter)
+        
+        filter_hlay = QHBoxLayout()
+        filter_hlay.addWidget(filter_label)
+        filter_hlay.addWidget(self._filter_line)
+        grid.addLayout(filter_hlay, 8, 0)
+        
+        # Show spheres checkbox
+        self._show_spheres_checkbox = QCheckBox("Show pale yellow spheres at tensor positions")
+        self._show_spheres_checkbox.setChecked(show_spheres)
+        self._show_spheres_checkbox.stateChanged.connect(self._setshowspheres)
+        grid.addWidget(self._show_spheres_checkbox, 9, 0)
+        
+        # Tensor level (total / electronic / nuclear contribution)
+        tensor_level_label = QLabel("Tensor contribution:")
+        self._tensor_level_combo = QComboBox()
+        self._tensor_level_combo.addItem("Total", 'tot')
+        self._tensor_level_combo.addItem("Electronic", 'ele')
+        self._tensor_level_combo.addItem("Nuclear", 'nuc')
+        idx = self._tensor_level_combo.findData(tensor_level)
+        self._tensor_level_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self._tensor_level_combo.currentIndexChanged.connect(self._settensorlevel)
+        
+        tensor_level_hlay = QHBoxLayout()
+        tensor_level_hlay.addWidget(tensor_level_label)
+        tensor_level_hlay.addWidget(self._tensor_level_combo)
+        grid.addLayout(tensor_level_hlay, 10, 0)
+        
+        # Fragment filter (only usable if fragments are loaded)
+        if nfrags > 0:
+            frag_checkbox_text = f"Filter by fragment index (1-{nfrags})"
+        else:
+            frag_checkbox_text = "Filter by fragment index (no fragments loaded)"
+        self._frag_checkbox = QCheckBox(frag_checkbox_text)
+        self._frag_checkbox.setEnabled(nfrags > 0)
+        self._frag_checkbox.setChecked(self._use_frags)
+        self._frag_checkbox.stateChanged.connect(self._setusefrags)
+        grid.addWidget(self._frag_checkbox, 11, 0)
+        
+        self._frag_line = QLineEdit()
+        self._frag_line.setPlaceholderText("e.g., 1,2 (comma-separated fragment indices)")
+        self._frag_line.setEnabled(self._use_frags)
+        if self._frag_filter_str:
+            self._frag_line.setText(self._frag_filter_str)
+        self._frag_line.textChanged.connect(self._setfragfilter)
+        grid.addWidget(self._frag_line, 12, 0)
+        
+        # Dialog buttons
+        QBtn = QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        self.buttonBox = QDialogButtonBox(QBtn)
+        self.buttonBox.accepted.connect(self.accept)
+        self.accepted.connect(self._setvals)
+        self.buttonBox.rejected.connect(self.reject)
+        
+        self.vlay.addWidget(self.buttonBox)
+        self.setLayout(self.vlay)
+    
+    def _setvals(self):
+        """Set the values from the dialog controls."""
+        self._sphere_radius = self._radius_line._getvalue()
+        self._nb_sphere_samples = self._samples_line._getvalue()
+        self._nb_sphere_surface = self._surface_samples_line._getvalue()
+        self._vector_scale = self._scale_line._getvalue()
+        self._surface_scale = self._surface_scale_line._getvalue()
+        self._opacity = self._opacity_line._getvalue()
+        # color_scheme and surf_color_scheme are already set by the combo box callbacks
+    
+    def _setcolorscheme(self):
+        """Set the color scheme from the combo box."""
+        self._color_scheme = self._color_combo.currentText()
+    
+    def _setsurfcolorscheme(self):
+        """Set the surface color scheme from the combo box."""
+        self._surf_color_scheme = self._surf_color_combo.currentText()
+    
+    def _setatomfilter(self):
+        """Set the atom filter from the text input."""
+        self._atom_filter = self._filter_line.text().strip()
+        if not self._atom_filter:
+            self._atom_filter = None
+    
+    def _setshowspheres(self):
+        """Set the show spheres flag from the checkbox."""
+        self._show_spheres = self._show_spheres_checkbox.isChecked()
+    
+    def _settensorlevel(self):
+        """Set the tensor level (total/electronic/nuclear) from the combo box."""
+        self._tensor_level = self._tensor_level_combo.currentData()
+    
+    def _setusefrags(self):
+        """Enable/disable the fragment filter based on the checkbox state."""
+        self._use_frags = self._frag_checkbox.isChecked()
+        self._frag_line.setEnabled(self._use_frags)
+        if not self._use_frags:
+            self._frag_filter_str = None
+    
+    def _setfragfilter(self):
+        """Set the fragment filter string from the text input."""
+        self._frag_filter_str = self._frag_line.text().strip()
+        if not self._frag_filter_str:
+            self._frag_filter_str = None
+    
+    @property
+    def sphere_radius(self) -> float:
+        """Get the sphere radius value."""
+        return self._sphere_radius
+    
+    @property
+    def nb_sphere_samples(self) -> int:
+        """Get the number of sphere samples for vectors."""
+        return self._nb_sphere_samples
+    
+    @property
+    def nb_sphere_surface(self) -> int:
+        """Get the number of sphere samples for surfaces."""
+        return self._nb_sphere_surface
+    
+    @property
+    def vector_scale(self) -> float:
+        """Get the vector scale factor."""
+        return self._vector_scale
+    
+    @property
+    def surface_scale(self) -> float:
+        """Get the surface scale factor."""
+        return self._surface_scale
+    
+    @property
+    def opacity(self) -> float:
+        """Get the opacity value."""
+        return self._opacity
+    
+    @property
+    def color_scheme(self) -> str:
+        """Get the vector color scheme."""
+        return self._color_scheme
+    
+    @property
+    def surf_color_scheme(self) -> str:
+        """Get the surface color scheme."""
+        return self._surf_color_scheme
+    
+    @property
+    def atom_filter(self) -> tp.Optional[tp.List[str]]:
+        """Get the atom filter as a list of atomic symbols."""
+        if self._atom_filter is None or self._atom_filter == "":
+            return None
+        # Split by comma and strip whitespace from each symbol
+        symbols = [symbol.strip() for symbol in self._atom_filter.split(',')]
+        # Filter out empty strings
+        symbols = [symbol for symbol in symbols if symbol]
+        return symbols if symbols else None
+    
+    @property
+    def show_spheres(self) -> bool:
+        """Get the show spheres flag."""
+        return self._show_spheres
+    
+    @property
+    def tensor_level(self) -> str:
+        """Get the tensor contribution level ('tot', 'ele', or 'nuc')."""
+        return self._tensor_level
+    
+    @property
+    def frag_filter(self) -> tp.Optional[tp.List[int]]:
+        """Get the fragment filter as a list of fragment indices.
+
+        Returns:
+            None if the fragment filter checkbox is unchecked (or no fragments
+            are loaded), otherwise a list of the selected fragment indices.
+        """
+        if not self._use_frags or not self._frag_filter_str:
+            return None
+        try:
+            indices = [int(x.strip())-1 for x in self._frag_filter_str.split(',') if x.strip()]
+        except ValueError:
+            return None
+        return indices if indices else None
+
 
 class MoleculeConfigDialog(QDialog):
     def __init__(self, parent=None, wireframe=False, opacity=1.0, bond_radius=0.03, atom_radius_scale=0.03, tubes_mode=False, bond_tollerance=0.23, hide_auto_group=False, has_auto_fragment=False):

@@ -661,9 +661,9 @@ def getellipsoid(crd: np.ndarray,
     """Randomly and uniformly sample points from the ellipsoid enclosing the molecular system
     The molecular system is scaled by a factor to sample the surrounding space.
     """
-    if whgts is not None:
+    if whgts is None:
         whgts = np.ones(crd.shape[0])
-    print(npoints)
+    print(f"getellipsoid: npoints = {npoints}")
     geom_cntr = np.average(np.array(crd), axis=0)
     dots = sample(np.cov(np.array(crd).T*scale, aweights=whgts),
                   geom_cntr, m_FA=npoints)
