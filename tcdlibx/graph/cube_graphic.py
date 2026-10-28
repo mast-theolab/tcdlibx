@@ -5,6 +5,7 @@ Libs to plot the vector fields cube files
 import sys
 import operator
 import numpy as np
+import matplotlib as mpl
 import matplotlib.cm as cm
 from matplotlib.collections import LineCollection
 from matplotlib.animation import FuncAnimation
@@ -209,11 +210,13 @@ def draw_nm2d(ax_out, coord, e_vec, axis, scal_f, to_bohr=False):
 
 
 def draw_nm2dcw(ax_out, coord, e_vec,
-                atnums, axis, scal_f, to_bohr=False):
+                atnums, axis, scal_f, to_bohr=False, invert=True):
     """
     Draw the Normal Modes of a vibration
-    in the 2D plot
+    in the 2D plot, weighted by the nuclear charge
+    (with the phase inverted if invert is True)
     """
+    sign = -1 if invert else 1
     if to_bohr:
         cscl = 1.
     else:
@@ -227,8 +230,8 @@ def draw_nm2dcw(ax_out, coord, e_vec,
     for i in range(atom_num):
         xth.append(coord[i][ith_one]*cscl)
         yth.append(coord[i][ith_two]*cscl)
-        uth.append(e_vec[i * 3 + ith_one]*(-atnums[i])/scal_f)
-        vth.append(e_vec[i * 3 + ith_two]*(-atnums[i])/scal_f)
+        uth.append(e_vec[i * 3 + ith_one]*(sign*atnums[i])/scal_f)
+        vth.append(e_vec[i * 3 + ith_two]*(sign*atnums[i])/scal_f)
     ax_out.quiver(xth, yth, uth, vth, units='width',
                   zorder=1, headwidth=2, headlength=4,
                   headaxislength=3.5, scale=3, color='r')
@@ -243,7 +246,7 @@ def draw_cube(ax1, cbdat, lvec=0.1):
     # fig = plt.figure()
     # fig.clf()
     # ax = fig.gca(projection='3d')
-    colma = cm.get_cmap("seismic")
+    colma = mpl.colormaps["seismic"]
     ax1.quiver(cbdat.box[0, :], cbdat.box[1, :],
                cbdat.box[2, :], cbdat.cube[0, :],
                cbdat.cube[1, :], cbdat.cube[2, :],
@@ -327,7 +330,7 @@ def stream_plt(ax0, cubdat, axis):
     #                           cmap=cm.PuRd)
     # liwg = to_grid(liwg, ax_dim)
     # mod = to_grid(mod, ax_dim)
-    colma = cm.get_cmap("Blues")
+    colma = mpl.colormaps["Blues"]
     strm = ax0.streamplot(box2[0, :, :], box2[1, :, :],
                           vec2[0, :, :], vec2[1, :, :],
                           density=[2.7, 2.7],
@@ -420,7 +423,7 @@ def stream2_plt(ax0, cubdat, axis, loops=False, background=True):
         ax0.add_collection(line)
     # Add the background representing the field magnitude
     if background:
-        _cmap = cm.get_cmap('Blues').copy()
+        _cmap = mpl.colormaps['Blues'].copy()
         _cmap.set_bad('white')
         norm_masked = np.ma.masked_where(norm < 1e-8, norm)
         ax0.imshow(norm_masked, extent=[box2[0, :, :].min(),
@@ -462,7 +465,7 @@ def quiver_plt(ax0, cubdat, axis, vscale,
     ax_dim = (cubdat.npts[ith_one], cubdat.npts[ith_two])
     if background:
         vec_norm = (np.linalg.norm(vec2, axis=0)).reshape(ax_dim).T
-        _cmap = cm.get_cmap('Blues').copy()
+        _cmap = mpl.colormaps['Blues'].copy()
         _cmap.set_bad('white')
         vec_norm_masked = np.ma.masked_where(vec_norm < 1e-4, vec_norm)
         ax0.imshow(vec_norm_masked, extent=[box2[0, :].min(),
@@ -471,8 +474,10 @@ def quiver_plt(ax0, cubdat, axis, vscale,
                                  box2[1, :].min()],
                    interpolation='bilinear', cmap=_cmap)
     if subsample > 1:
-        vec2 = vec2[:, ::subsample]
-        box2 = box2[:, ::subsample]
+        # subsample the 2D grid along both in-plane axes (slicing the
+        # flattened array would keep every point along one of them)
+        vec2 = vec2.reshape(2, *ax_dim)[:, ::subsample, ::subsample].reshape(2, -1)
+        box2 = box2.reshape(2, *ax_dim)[:, ::subsample, ::subsample].reshape(2, -1)
     # ax_dim = vec2.shape
     if filtred:
         vec_norm = np.sqrt((vec2 ** 2).sum(axis=0))
@@ -485,7 +490,9 @@ def quiver_plt(ax0, cubdat, axis, vscale,
     if clim is not None:
         vec_norm = np.sqrt((vec2 ** 2).sum(axis=0))
         vec2[:, vec_norm < clim[0]] = 0
-        vec2[:, vec_norm > clim[1]] = clim[1]
+        # cap the length at clim[1], keeping the direction
+        over = vec_norm > clim[1]
+        vec2[:, over] *= clim[1] / vec_norm[over]
 
     quiv = ax0.quiver(box2[0, :], box2[1, :], vec2[0, :],
                       vec2[1, :], units='width',

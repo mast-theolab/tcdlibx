@@ -81,6 +81,8 @@ def build_parser():
                       help='Print normal modes')
     draw.add_argument('--scaleNM', type=float, default=1.,
                       help='Scaling factor for the Normal Modes')
+    draw.add_argument('--noInvertNM', action='store_true',
+                      help='Draw the charge-weighted Normal Modes without inverting their phase')
     draw.add_argument('--printTitle', type=str, default=None,
                       help='Print this title')
     draw.add_argument('--setlimit',
@@ -329,7 +331,8 @@ Coordinates (in Bohr)
         if OPTS.printNM:
             cbplt.draw_nm2dcw(ax0, cubdat.crd, all_nmodes[int(idvstate-1)],
                             # OPTS.axis, OPTS.scaleNM, to_bohr=True)
-                              cubdat.ian, OPTS.axis, OPTS.scaleNM, to_bohr=True)
+                              cubdat.ian, OPTS.axis, OPTS.scaleNM, to_bohr=True,
+                              invert=not OPTS.noInvertNM)
         if OPTS.type == 'quiver':
             clim = [OPTS.qlower, OPTS.qupper]
             bkg = False
