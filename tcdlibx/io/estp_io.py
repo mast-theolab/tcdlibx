@@ -125,7 +125,6 @@ def get_mol(fname):
 
     return res
 
-
 def get_elemol(fname):
     """_summary_
 

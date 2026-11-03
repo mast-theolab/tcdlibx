@@ -33,7 +33,7 @@ import numpy as np
 # import custom library
 from estampes.data.physics import PHYSFACT, phys_fact
 import tcdlibx.calc.cube_manip as cb
-import tcdlibx.io.fchk_io as fio
+import tcdlibx.io.estp_io as estp
 from tcdlibx.utils.color_out import Colors
 
 PROGNAME = os.path.basename(sys.argv[0])
@@ -143,7 +143,9 @@ def main():
     states = list(range(opts.min_state, opts.max_state + 1))
 
     fit_ev = read_energies(opts.energies, states)
-    fchk_au = fio.get_etran_energies(opts.tdfchk)
+    # TD file
+    tdmol = estp.get_elemol(opts.tdfchk)
+    fchk_au = tdmol['exeng']
     if opts.max_state > len(fchk_au):
         error(f'{opts.tdfchk} contains only {len(fchk_au)} states')
 
@@ -164,10 +166,10 @@ def main():
         cubes[state] = cube
 
     # Vibrational frequency of the mode (fchk)
-    mol = fio.fchk_vib_parser(opts.freqfchk)
-    if mode > len(mol['frq']):
+    vbmol = estp.get_vibmol(opts.freqfchk)
+    if mode > len(vbmol['freq']):
         error(f'mode {mode} not found in {opts.freqfchk}')
-    freq_cm1 = mol['frq'][mode - 1]
+    freq_cm1 = vbmol['freq'][mode - 1]
     freq_au = freq_cm1 / phys_fact('au2cm1')
 
     # Enhancement factors
