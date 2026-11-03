@@ -8,6 +8,7 @@ import copy
 from math import ceil
 import numpy as np
 # custom libraries
+from estampes.data.physics import phys_fact
 from tcdlibx.utils.custom_except import NoValidData
 from tcdlibx.utils.var_tools import angle_between, Poliedron, trilinerarinterpolation
 GPU = importlib.util.find_spec('numba')
@@ -31,21 +32,45 @@ def mynorm(vec: np.ndarray) -> np.ndarray:
     return vec/modl(vec)
 
 
-def mu_integrate(cubdata: 'CubeData', mask: np.ndarray | None = None) -> np.ndarray:
-    """integrate vector field in all space"""
+# Conventions of the ELEMENTS (lmnts) cubes, all quantities in atomic units:
+# - ETCD (tcd_cube, velocity gauge), state e with excitation energy w_eg:
+#     EDTM = int J / w_eg            (length-equivalent, = fchk ETran EDTM)
+#     MDTM = -int (r-O) x J          (= fchk ETran MDTM, O = coordinate origin)
+# - VTCD (vtcd_cube/lr_vtcd_cube), mode a with frequency w_a:
+#     EDTM = -(1/w_a) int J
+#     MDTM = -1/2 int (r-O) x J      (m10, O = nuclear charge centre)
+CUBE_KINDS = ('etcd', 'vtcd')
+
+
+def charge_centre(cubdata: 'CubeData') -> np.ndarray:
+    """Return the nuclear charge centre of the system in the cube."""
+    charges = np.asarray(cubdata.ian, dtype=float)
+    return charges @ cubdata.crd / charges.sum()
+
+
+def mu_integrate(cubdata: 'CubeData', omega: float, kind: str = 'vtcd',
+                 mask: np.ndarray | None = None) -> np.ndarray:
+    """Return the EDTM (au) of an ELEMENTS cube.
+
+    omega is the excitation energy w_eg (etcd) or the vibrational
+    frequency w_a (vtcd), in atomic units.
+    """
+    if kind not in CUBE_KINDS:
+        raise NoValidData('mu_integrate', f'Unknown cube kind: {kind}')
     if mask is not None:
-        mask.any()
         vec_1 = cubdata.cube[:, mask]
     else:
         vec_1 = cubdata.cube
-    poligon = cubdata.get_voxvol()
-    integrated = vec_1.sum(axis=1) * poligon * -1 * np.sqrt(2)  # Vedi franco
-    return integrated
+    integrated = vec_1.sum(axis=1) * cubdata.get_voxvol()
+    if kind == 'etcd':
+        return integrated / omega
+    return -integrated / omega
 
 
-def calc_rot(cubdata: 'CubeData', mask: np.ndarray | None = None) -> np.ndarray:
+def calc_rot(cubdata: 'CubeData', mask: np.ndarray | None = None,
+             origin: np.ndarray | None = None) -> np.ndarray:
     """
-    Calculate the rotor of a a vector fields
+    Calculate (r-origin) x J for a vector field
     """
     if not cubdata.box.size:
         cubdata.make_box()
@@ -55,6 +80,8 @@ def calc_rot(cubdata: 'CubeData', mask: np.ndarray | None = None) -> np.ndarray:
     else:
         vec_1 = cubdata.cube
         box_1 = cubdata.box
+    if origin is not None:
+        box_1 = box_1 - np.asarray(origin)[:, np.newaxis]
     if GPU:
         res = np.zeros_like(vec_1)
         for i_th in range(vec_1.shape[1]):
@@ -64,13 +91,23 @@ def calc_rot(cubdata: 'CubeData', mask: np.ndarray | None = None) -> np.ndarray:
     return res
 
 
-def mag_integrate(cubdata: 'CubeData', mask: np.ndarray | None = None) -> np.ndarray:
-    """integrate vector field in all space"""
-    poligon = cubdata.get_voxvol()
-    res = calc_rot(cubdata, mask)
-    integrated = res.sum(axis=1) * poligon * -1 * np.sqrt(2) # hbar=1
-    # to get gaussian value(
-    return integrated  # to the magnetic dipole moment
+def mag_integrate(cubdata: 'CubeData', kind: str = 'vtcd',
+                  origin: np.ndarray | None = None,
+                  mask: np.ndarray | None = None) -> np.ndarray:
+    """Return the MDTM (au) of an ELEMENTS cube.
+
+    The default origin is the coordinate origin for etcd cubes and the
+    nuclear charge centre for vtcd cubes.
+    """
+    if kind not in CUBE_KINDS:
+        raise NoValidData('mag_integrate', f'Unknown cube kind: {kind}')
+    if origin is None and kind == 'vtcd':
+        origin = charge_centre(cubdata)
+    integrated = calc_rot(cubdata, mask, origin).sum(axis=1) \
+        * cubdata.get_voxvol()
+    if kind == 'etcd':
+        return -integrated
+    return -0.5 * integrated
 
 
 def mask_cube(datacub: 'CubeData', mu_tot: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -787,7 +824,7 @@ class VecCubeData(CubeData):
             vec_1 = self.cube
             box_1 = self.box
         if origin is not None:
-            box_1 -= origin[:, np.newaxis]
+            box_1 = box_1 - np.asarray(origin)[:, np.newaxis]
         if GPU:
             res = np.zeros_like(vec_1)
             for i_th in range(vec_1.shape[1]):
@@ -860,18 +897,19 @@ class VtcdData(VecCubeData):
             print("{}:{}".format(err.expression, err.message))
 
     def mu_integrate(self, mask: np.ndarray | None = None) -> np.ndarray:
-        """integrate vector field in all space"""
-        integrated = self.integrate(mask=mask) * -1 * 2
-        return integrated
+        """EDTM (au) of the ELEMENTS VTCD cube: -(1/w_a) int J.
+
+        self.energy is the vibrational frequency in cm^-1.
+        """
+        return mu_integrate(self, self.energy/phys_fact('au2cm1'), 'vtcd',
+                            mask=mask)
 
     def mag_integrate(self, mask: np.ndarray | None = None, origin: np.ndarray | None = None) -> np.ndarray:
-        """integrate vector field in all space"""
-        poligon = self.get_voxvol()
-        res = self._calc_rot(mask, origin=origin)
-        # m = -1/2 * sum(cross(r,J)) in atomic units
-        # integrated = res.sum(axis=1) * poligon / (2 * 137) * -1
-        integrated = res.sum(axis=1) * poligon * -1/2
-        return integrated
+        """MDTM (au, m10) of the ELEMENTS VTCD cube: -1/2 int (r-O) x J.
+
+        The default origin is the nuclear charge centre.
+        """
+        return mag_integrate(self, 'vtcd', origin=origin, mask=mask)
 
     def mag_integrate_test(self, mask: np.ndarray | None = None) -> np.ndarray:
         """multi origin?
@@ -1127,11 +1165,10 @@ class AimCubeData(VecCubeData):
         Delegates to appropriate method based on the underlying data type
         """
         if hasattr(self, 'evec') and hasattr(self, 'energy'):
-            # This is VTCD data, use specialized integration
-            integrated = self.integrate(mask=mask) * -1 
-            return integrated
+            # VTCD data: ELEMENTS EDTM, as VtcdData
+            return VtcdData.mu_integrate(self, mask=mask)
         else:
-            # Regular vector field integration
+            # ETCD data: raw int J, converted by the caller (/ w_eg)
             return self.integrate(mask=mask)
 
     def mag_integrate(self, mask: np.ndarray | None = None, origin: np.ndarray | None = None) -> np.ndarray:
@@ -1140,13 +1177,10 @@ class AimCubeData(VecCubeData):
         Delegates to appropriate method based on the underlying data type
         """
         if hasattr(self, 'evec') and hasattr(self, 'energy'):
-            # This is VTCD data, use specialized integration
-            poligon = self.get_voxvol()
-            res = self._calc_rot(mask, origin=origin)
-            integrated = res.sum(axis=1) * poligon * -1/2
-            return integrated
+            # VTCD data: ELEMENTS MDTM, as VtcdData
+            return VtcdData.mag_integrate(self, mask=mask, origin=origin)
         else:
-            # Regular rotational integration
+            # ETCD data: raw int r x J, converted by the caller
             return self.rotorintegrate(mask=mask, origin=origin)
 
     def get_frags_contribution(self) -> dict[str, list[np.ndarray]]:
@@ -1407,6 +1441,9 @@ def cube_parser(cubfile: str,
         vec_num = vec_num.transpose()
     if nval == 3 and not elemenents:
         # Correction between old behavior and elements
+        print(f'WARNING: {cubfile} read as a legacy (non-ELEMENTS) cube: '
+              'data scaled by sqrt(2). The dipole integrals assume the '
+              'ELEMENTS conventions.')
         vec_num *= np.sqrt(2)
     data_tmp.cube = vec_num
 

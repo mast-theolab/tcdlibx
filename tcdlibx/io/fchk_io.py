@@ -253,4 +253,32 @@ def get_transition_energy(fname):
         print(en_tot, en_zero)
 
     return en_tot-en_zero
-#
+
+
+def get_etran_energies(fname):
+    """
+    reads from a TD fchk file the excitation energies (au) of all states,
+    from "ETran state values" minus the "SCF Energy"
+    """
+    data = {}
+    with open(fname, 'r', encoding='utf-8') as fopen:
+        line = fopen.readline()
+        while line:
+            for key in ('SCF Energy', 'ETran scalars', 'ETran state values'):
+                if line.startswith(key):
+                    if 'N=' not in line:
+                        data[key] = [float(line.split()[-1])]
+                    else:
+                        nval = int(line.split()[-1])
+                        tmp = []
+                        while len(tmp) < nval:
+                            tmp.extend(float(x) for x in fopen.readline().split())
+                        data[key] = tmp
+            line = fopen.readline()
+    for key in ('SCF Energy', 'ETran scalars', 'ETran state values'):
+        if key not in data:
+            raise NoValidData('get_etran_energies', '{} not found in fchk file'.format(key))
+    nstates = int(data['ETran scalars'][0])
+    lblock = int(data['ETran scalars'][1])
+    etran = np.array(data['ETran state values'])
+    return etran[0:nstates*lblock:lblock] - data['SCF Energy'][0]

@@ -13,11 +13,12 @@ import argparse
 from math import ceil
 import numpy as np
 # import custom library
-from estampes.data.physics import PHYSFACT
+from estampes.data.physics import PHYSFACT, phys_fact
 import tcdlibx.calc.cube_manip as cb
 # from tcdlibx.utils.custom_except import NoValidData
 from tcdlibx.utils.color_out import Colors
 import tcdlibx.io.fchk_io as fio
+from tcdlibx.io.fchk_io import get_etran_energies
 from tcdlibx.utils.var_tools import get_ivib, print_lines
 # import variabiles
 from tcdlibx.utils.mol_data import ELEMENTS
@@ -26,9 +27,11 @@ PROGNAME = os.path.basename(sys.argv[0])
 NSTEP_BOX = 1
 # SCALE_ARROW = 1.0e9
 SCALE_ARROW = None
-# Nessun prefattore applicato
-# Vedi definizione eq6 in pccp
-PRE_FACT = 1
+# The VTCD follows the vtcd_cube (ELEMENTS) convention, Freedman et al.,
+# J. Mol. Struct. 550-551 (2000) 123, Eq. 7:
+#   J = 2 w_a zp sum_e (<e|dg/dQ_a>/sqrt(mu_a)) J_ge / w_eg,
+# with zp = 1/sqrt(2 w_a m_u) the zero-point amplitude (au), so that
+#   EDTM = -(1/w_a) int J  and  MDTM = -1/2 int (r-O) x J.
 
 
 def build_parser():
@@ -265,7 +268,10 @@ def main():
                 print(cp.printred(fmt.format(fext)))
                 sys.exit()
         res = re.findall('(X+)', tmplfiles[key])
-        if not tmplftypes[key] == 'dat':
+        if key == 'EXC' and tmplftypes[key] == 'fchk' and not res:
+            # single TD fchk: energies of all states from ETran
+            tmplfmt[key] = tmplfiles[key]
+        elif not tmplftypes[key] == 'dat':
             if not res:
                 print(cp.printred("ERROR: Missing X's in filename pattern"))
                 sys.exit()
@@ -329,6 +335,26 @@ Coordinates (in Bohr)
         smodes.append('{}({})'.format(mode, dmodes[mode]))
     idvstate = get_ivib(nquanta, lmodes, dmodes, nvib)
 
+    # ELEMENTS prefactors, defined for fundamentals only
+    if nquanta == 1:
+        imode = lmodes[0] - 1
+        freq_au = mol['frq'][imode] / phys_fact('au2cm1')
+        zp_ampl = 1.0 / np.sqrt(2.0 * freq_au / phys_fact('au2amu'))
+        pre_fact = 2.0 * freq_au * zp_ampl
+        nac_norm = 1.0 / np.sqrt(mol['rmas'][imode])
+    else:
+        print(cp.printorange('WARNING: ELEMENTS prefactors are defined for '
+                             'fundamentals only; overtones/combinations are '
+                             'not scaled and their EDTM/MDTM are not '
+                             'computed.'))
+        freq_au = None
+        pre_fact = 1.0
+        nac_norm = 1.0
+    if tmplftypes['EXC'] == 'fchk' and '{' not in tmplfmt['EXC']:
+        etran = get_etran_energies(tmplfmt['EXC'])
+    else:
+        etran = None
+
     # Use 1st electronic state to build box
     title = 'CURRENT DENSITY FOR MODE {}'.format(OPTS.vibstate)
     print('''
@@ -391,9 +417,10 @@ Coordinates (in Bohr)
                 print('ERROR: Non-adiabatic couplings not found. Exiting')
                 sys.exit()
             else:
-                if isinstance(dNAC, list):
-                    # FIXME to check
-                    NACvib = np.dot(evec, np.array(dNAC))[int(idvstate-1)]
+                if isinstance(dNAC, (list, np.ndarray)):
+                    # Cartesian NAC projected on the (fchk) normal mode
+                    NACvib = np.dot(evec, np.array(dNAC))[int(idvstate-1)] \
+                        * nac_norm
                     print('state:{} NAC:{}'.format(elst, NACvib))
                 else:
                     NACvib = dNAC
@@ -401,8 +428,11 @@ Coordinates (in Bohr)
         if OPTS.noweight:
             X = 1.0
         else:
-            Etrans = get_transition_energy(fnames['EXC'])
-            X = NACvib/Etrans
+            if etran is not None:
+                Etrans = etran[elst-1]
+            else:
+                Etrans = get_transition_energy(fnames['EXC'])
+            X = NACvib/Etrans * pre_fact
         if not flag:
             cubdat = cb.cube_parser(fnames['TCD'])
             cubdat.make_box()
@@ -413,12 +443,12 @@ Coordinates (in Bohr)
             cubdat += cb.cube_parser(fnames['TCD']) * X
 
         # DEBUG
-        if not(OPTS.noNAC or OPTS.noweight) \
+        if not(OPTS.noNAC or OPTS.noweight) and freq_au is not None \
         and (OPTS.printConv or ((elst == lst_elst[-1])
                                 and (OPTS.printVec or
                                      OPTS.saveSignedCube))):
-            mu_state = cb.mu_integrate(cubdat)
-            mg_state = cb.mag_integrate(cubdat)
+            mu_state = cb.mu_integrate(cubdat, freq_au, 'vtcd')
+            mg_state = cb.mag_integrate(cubdat, 'vtcd')
             if OPTS.printVec and (elst == lst_elst[-1]):
                 dcube = cb.CubeData()
                 dcube.natoms = 0
@@ -457,10 +487,31 @@ Coordinates (in Bohr)
 
         flag += 1
 
+    comment = 'VTCD Nmodes: {} Last State: {}'.format(OPTS.vibstate, lst_elst[-1])
+    if freq_au is not None and not (OPTS.noNAC or OPTS.noweight):
+        # Electronic and nuclear moments, as in vtcd_cube
+        edtm_ele = cb.mu_integrate(cubdat, freq_au, 'vtcd')
+        mdtm_ele = cb.mag_integrate(cubdat, 'vtcd')
+        charges = np.asarray(mol['atnum'], dtype=float)
+        origin = charges @ mol['crd'] / charges.sum()
+        disp = evec[imode].reshape(-1, 3) * nac_norm * zp_ampl
+        edtm_nuc = charges @ disp
+        mdtm_nuc = 0.5 * freq_au * np.sum(
+            charges[:, np.newaxis] * np.cross(mol['crd'] - origin, disp),
+            axis=0)
+        fmtv = '[{:14.7E},{:14.7E},{:14.7E}]'.format
+        print('EDTM (au) for mode {}:'.format(OPTS.vibstate))
+        print('  Electronic: {}  Nuclear: {}  Total: {}'.format(
+            fmtv(*edtm_ele), fmtv(*edtm_nuc), fmtv(*(edtm_ele+edtm_nuc))))
+        print('MDTM (au) for mode {}, origin at nuclear charge centre:'.format(
+            OPTS.vibstate))
+        print('  Electronic: {}  Nuclear: {}  Total: {}'.format(
+            fmtv(*mdtm_ele), fmtv(*mdtm_nuc), fmtv(*(mdtm_ele+mdtm_nuc))))
+        comment += ' | Electronic EDTM: {}, Nuclear EDTM: {}'.format(
+            fmtv(*edtm_ele), fmtv(*edtm_nuc))
+
     if not OPTS.noCube:
-        cubdat.cube *= PRE_FACT
         outfile = os.path.splitext(OPTS.refstate)[0] + '_VTCD{}_U{}.cube'.format(OPTS.vibstate, lst_elst[-1])
-        comment = 'VTCD Nmodes: {} Last State: {}'.format(OPTS.vibstate, lst_elst[-1])
         cb.print_cube(cubdat, fname=outfile, comment=comment)
 
     if OPTS.saveSignedCube:

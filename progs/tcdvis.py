@@ -963,8 +963,10 @@ class TCDvis(VFieldAnimationMixin, QMainWindow):
             # Fix properly the exceptions
             except Exception as err:
                 print(err)
+                return None
         except Exception as err:
             print(err)
+            return None
 
         self._cleanactors()
         self._actors = {}

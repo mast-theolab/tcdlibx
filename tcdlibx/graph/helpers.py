@@ -367,9 +367,11 @@ class VibMolecule(Molecule):
         nuc_tens = nuclear_tensors(np.array(self.atnum),
                                    self.crd)
         self._moldata['aptnuc'] = nuc_tens['aptnuc']
-        self._moldata['aptele'] = self._moldata['apt'] - nuc_tens['aptnuc']
         self._moldata['aatnuc'] = nuc_tens['aatnuc']
-        self._moldata['aatele'] = self._moldata['aat'] - nuc_tens['aatnuc']
+        # APT/AAT are missing in the fchk of a frequency calculation without IR/VCD
+        for key in ('apt', 'aat'):
+            tens = self._moldata[key]
+            self._moldata[f'{key}ele'] = None if tens is None else tens - nuc_tens[f'{key}nuc']
 
     def get_freq(self, vib: int) -> float:
         if vib > self._nvib - 1  or vib < 0:
@@ -434,14 +436,10 @@ class VibMolecule(Molecule):
         else:
             raise NoValidData("Molecule.get_tcd_dtm", 'No valid dtm type: tot, frag')
         if cgs:
-            if tps == "frag":
-                for i in range(res[0].shape[0]):
-                    res = (np.array([edip_cgs(res[0][i, :], self.get_freq(vib))]),
-                           np.array([mdip_cgs(res[1][i, :], self.get_freq(vib))]))
-            else:
-                res = (edip_cgs(res[0], self.get_freq(vib)),
-                       mdip_cgs(res[1], self.get_freq(vib))) 
-        return res  
+            # ELEMENTS EDTM/MDTM are transition moments in au, not
+            # normal-coordinate derivatives: plain au -> cgs conversion.
+            res = (ele_edip_cgs(res[0]), ele_mdip_cgs(res[1]))
+        return res
            
     def get_evec(self, vib: int) -> np.ndarray:
         if vib > self._nvib - 1 or vib < 0:
@@ -585,17 +583,14 @@ class EleMolecule(Molecule):
                 raise NoValidData("Molecule.get_tcd_dtm", 'Frags or AIM data not available')
             # FIXME sistemare l'oggetto in cube_manip
             tmp_res = self._etcd[state].get_frags_contribution()
-            res = (np.array(tmp_res['int']), np.array(tmp_res['rot']))
+            # same conversion as the total: to length, and 1/2 r x J
+            res = (np.array(tmp_res['int']) / self._moldata['exeng'][state],
+                   np.array(tmp_res['rot']) / 2)
         else:
             raise NoValidData("EleMolecule.get_tcd_dtm", 'No valid dtm type: tot, frag')
         if cgs:
-            if tps == "frag":
-                for i in range(res[0].shape[0]):
-                    res = (np.array([ele_edip_cgs(res[0][i, :])]),
-                           np.array([ele_mdip_cgs(res[1][i, :])]))
-            else:
-                res = (ele_edip_cgs(res[0]),
-                       ele_mdip_cgs(res[1])) 
+            res = (ele_edip_cgs(res[0]),
+                   ele_mdip_cgs(res[1]))
         # print(res)
         return res  
            
