@@ -34,6 +34,19 @@ def get_hnac(fname):
     return (deng, nac)
 
 
+def get_nac(fname):
+    """Reads the Cartesian NAC (au) of the current state from a Gaussian fchk
+
+    Args:
+        fname (str): gaussian fchk filename
+
+    Returns:
+        np.ndarray: NAC as a flat array of 3*natoms elements
+    """
+    data = DataFile(fname).get_data(nac=QLabel(quantity=50))
+    return np.array(data['nac'].data)
+
+
 def get_vibmol(fname):
     """_summary_
 
