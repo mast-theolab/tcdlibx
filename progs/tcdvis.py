@@ -954,7 +954,8 @@ class TCDvis(QMainWindow):
                                          vtk_render_window=self.vtkWidget.GetRenderWindow(),
                                          vtk_scene_bounds=_vtk_bounds,
                                          lower=self._default["quiver"]["lower"],
-                                         upper=self._default["quiver"]["upper"])
+                                         upper=self._default["quiver"]["upper"],
+                                         atom_cutoff=self._default["quiver"].get("atom_cutoff", 0.3))
             quiverprm.exec()
             # Update the default values
             self._default["quiver"]["scale"] = quiverprm._scale
@@ -963,6 +964,7 @@ class TCDvis(QMainWindow):
             self._default["quiver"]["clip_bounds"] = quiverprm._clip_bounds
             self._default["quiver"]["lower"] = quiverprm._lower
             self._default["quiver"]["upper"] = quiverprm._upper
+            self._default["quiver"]["atom_cutoff"] = quiverprm._atom_cutoff
             self._default["quiver"]["show_rotor"] = quiverprm._show_rotor
             
             # Redraw quiver if it exists
@@ -1179,8 +1181,10 @@ class TCDvis(QMainWindow):
         self._nstates = self._fchk.ntrans
         if self._moltype == 'vib':
             self._trtext.setText("Normal mode number:")
+            self.etcdch.setText('Show VTCD field')
         elif self._moltype == 'ele':
-            self._trtext.setText("Transition number:") 
+            self._trtext.setText("Transition number:")
+            self.etcdch.setText('Show ETCD field')
         stval = QIntValidator(1, self._nstates)
         stval.setLocale(QLocale('English'))
         self.stline.setValidator(stval)
@@ -1539,8 +1543,10 @@ class TCDvis(QMainWindow):
                 self.start_animation()
             
         elif prop_cur == "quiver":
-            mask_index = filtervecatom(tmp_cube, 0.3)
-            tmp_cube.cube[:, mask_index] = 0
+            atom_cutoff = self._default["quiver"].get("atom_cutoff", 0.3)
+            if atom_cutoff > 0:
+                mask_index = filtervecatom(tmp_cube, atom_cutoff)
+                tmp_cube.cube[:, mask_index] = 0
             if self._default["quiver"]["show_rotor"]:
                 rotor_field = tmp_cube._calc_rot()
                 tmp_cube.cube = rotor_field

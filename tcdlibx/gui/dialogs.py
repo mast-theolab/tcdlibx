@@ -966,6 +966,7 @@ class QuiverSetupDialog(QDialog, _ClipPlaneMixin):
                  subsamp: int,
                  lower: float = 0.0001,
                  upper: float = 0.01,
+                 atom_cutoff: float = 0.3,
                  enable_clipping: bool = False,
                  clip_bounds: tp.Optional[tp.Dict[str, tp.Optional[float]]] = None,
                  show_rotor: bool = False,
@@ -981,6 +982,7 @@ class QuiverSetupDialog(QDialog, _ClipPlaneMixin):
             subsamp (int): Subsampling of the grid for arrows
             lower (float): lower bound to filter arrows (vectors below this norm are hidden)
             upper (float): upper bound to filter arrows (vectors above this norm are clamped)
+            atom_cutoff (float): vectors closer than atom_cutoff * vdW radius to an atom are hidden (0 = off)
             enable_clipping (bool): whether spatial clipping is enabled
             clip_bounds (tp.Optional[tp.Dict[str, tp.Optional[float]]]): clipping bounds
             parent (tp.Optional[tp.Union[QDialog, None]]): Not required
@@ -994,6 +996,7 @@ class QuiverSetupDialog(QDialog, _ClipPlaneMixin):
         self._init_clip_planes(vtk_renderer, vtk_render_window, vtk_scene_bounds)
         self._lower = lower
         self._upper = upper
+        self._atom_cutoff = atom_cutoff
         self.setWindowTitle("Quiver Setup Dialog")
         self.vlay = QVBoxLayout()
         grid = QGridLayout()
@@ -1023,16 +1026,23 @@ class QuiverSetupDialog(QDialog, _ClipPlaneMixin):
         grid.addWidget(message, 6, 0)
         grid.addLayout(self._upperline._hlay, 7, 0)
 
+        _cut_validator = QDoubleValidator(0.0, 5.0, 6)
+        _cut_validator.setLocale(QLocale.c())
+        message = QLabel("Atom cutoff (hide vectors within this fraction of the vdW radius, 0 = off):")
+        self._cutoffline = EditDoubleLine("Cutoff", atom_cutoff, _cut_validator)
+        grid.addWidget(message, 8, 0)
+        grid.addLayout(self._cutoffline._hlay, 9, 0)
+
         # Rotor display checkbox
         self._show_rotor_checkbox = QCheckBox("Show Rotor (r x J)")
         self._show_rotor_checkbox.setChecked(show_rotor)
-        grid.addWidget(self._show_rotor_checkbox, 8, 0, 1, 2)
+        grid.addWidget(self._show_rotor_checkbox, 10, 0, 1, 2)
 
         # Spatial clipping section
         self._clipping_checkbox = QCheckBox("Enable Spatial Clipping")
         self._clipping_checkbox.setChecked(enable_clipping)
         self._clipping_checkbox.stateChanged.connect(self._toggle_clipping)
-        grid.addWidget(self._clipping_checkbox, 9, 0, 1, 2)
+        grid.addWidget(self._clipping_checkbox, 11, 0, 1, 2)
         
         # Create clipping controls group (initially hidden)
         self._clipping_frame = QFrame()
@@ -1113,6 +1123,7 @@ class QuiverSetupDialog(QDialog, _ClipPlaneMixin):
         self._subsamp = self._subsampline._getvalue()
         self._lower = self._lowerline._getvalue()
         self._upper = self._upperline._getvalue()
+        self._atom_cutoff = self._cutoffline._getvalue()
         self._show_rotor = self._show_rotor_checkbox.isChecked()
         
         # Handle spatial clipping bounds
