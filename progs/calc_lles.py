@@ -4,7 +4,7 @@ LLES enhancement correction (Nafie's sum-over-states theory) of the VTCD.
 
 Starting from the per-state ETCD cubes (ELEMENTS, velocity gauge), the
 Cartesian NAC of each state (fchk) and the normal mode of the frequency
-fchk, builds the per-state VTCD of mode a as in calc_vtcd.py:
+fchk, builds the per-state VTCD:
 
     J_i = 2 w_a zp (<i|dg/dQ_a>/sqrt(mu_a)) / w_i,fchk * TCD_i
 
@@ -107,13 +107,9 @@ def read_energies(fname, states):
                 error(f'{fname}: energy of state {state} must be positive')
             energies[state] = value
     missing = sorted(set(states) - set(energies))
-    extra = sorted(set(energies) - set(states))
     if missing:
         error(f'{fname}: missing energies for states {missing}')
-    if extra:
-        error(f'{fname}: states {extra} outside the range '
-              f'{states[0]}-{states[-1]}')
-    return energies
+    return {state: energies[state] for state in states}
 
 
 def cube_name(template, state):
@@ -152,7 +148,7 @@ def main():
             error(f'{fname}: grid or molecule differ from the first cube')
         cubes[state] = cube
 
-    # Normal mode and ELEMENTS prefactors (as in calc_vtcd.py)
+    # Normal mode and ELEMENTS prefactors 
     vbmol = estp.get_vibmol(opts.freqfchk)
     mode = opts.mode
     if not 1 <= mode <= len(vbmol['freq']):

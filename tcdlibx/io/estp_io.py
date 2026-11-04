@@ -154,6 +154,7 @@ def get_elemol(fname):
               'atmas': QLabel(quantity='atmas'),
               'exeng': QLabel(quantity=1, refstate='0->a'),
               'edip': QLabel(quantity=101, refstate='0->a', descriptor='vel'),
+              'edipl': QLabel(quantity=101, refstate='0->a', descriptor='len'),
               'mdip': QLabel(quantity=102, refstate='0->a'),
               'na': QLabel(quantity='NAtoms')}
     # print(fname)
@@ -175,6 +176,7 @@ def get_elemol(fname):
     # Waiting for fix in estampes
     res['exeng'] = np.array(data['exeng'].data)
     res['edi'] = np.array(data['edip'].data)
+    res['edil'] = np.array(data['edipl'].data)
     res['mdi'] = np.array(data['mdip'].data)
 
     return res
