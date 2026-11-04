@@ -1,7 +1,7 @@
 import numpy as np
 from cube_manip import CubeData, VecCubeData
 from tcdlibx.utils.custom_except import NoValidData
-from estampes.data.physics import PHYSFACT, PHYSCNST, phys_fact
+from tcdlibx.utils.conversion_units import edip_conv, mdip_conv
 
 class TenCubData(CubeData):
     """
@@ -101,10 +101,10 @@ class VcdData(VecCubeData):
             print('Transition energy not set')
             return 1
         if self.typev == 'ele':
-            prefactor = phys_fact("au2esu")*PHYSFACT.bohr2ang*1.0e-8
+            prefactor = edip_conv
             # np.sqrt(cb.PC.au2cm1()/(2*self.energy)) per D
         elif self.typev == 'mag':
-            prefactor = 1.0e4*PHYSCNST.planck/(2*np.pi)*phys_fact("au2esu") / PHYSFACT.amu2kg
+            prefactor = mdip_conv
             # per R c'è un due che balla
         else:
             raise NoValidData('VcdData._calc_prefactor', 'Not available')

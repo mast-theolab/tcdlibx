@@ -36,10 +36,11 @@ import re
 import argparse
 import numpy as np
 # import custom library
-from estampes.data.physics import PHYSFACT, phys_fact
+from estampes.data.physics import phys_fact
 import tcdlibx.calc.cube_manip as cb
 import tcdlibx.io.estp_io as estp
 from tcdlibx.utils.color_out import Colors
+from tcdlibx.utils.conversion_units import AU2EV, DQ_AMU2AU
 
 PROGNAME = os.path.basename(sys.argv[0])
 # Relative margin above w_a below which w_fit is close to resonance
@@ -155,7 +156,7 @@ def main():
         error(f'mode {mode} not found in {opts.freqfchk}')
     freq_cm1 = vbmol['freq'][mode - 1]
     freq_au = freq_cm1 / phys_fact('au2cm1')
-    zp_ampl = 1.0 / np.sqrt(2.0 * freq_au / phys_fact('au2amu'))
+    zp_ampl = DQ_AMU2AU / np.sqrt(2.0 * freq_au)
     pre_fact = 2.0 * freq_au * zp_ampl
     lx_mode = vbmol['lx'][mode - 1]
 
@@ -171,10 +172,9 @@ def main():
         weight[state] = lx_mode @ nac / fchk_au[state - 1] * pre_fact
 
     # Enhancement factors
-    au2ev = PHYSFACT.Eh2J / PHYSFACT.e2C
     fac, ratio = {}, {}
     for state in states:
-        w_fit = fit_ev[state] / au2ev
+        w_fit = fit_ev[state] / AU2EV
         denom = w_fit**2 - freq_au**2
         if denom == 0.0:
             error(f'state {state} is exactly resonant with the vibrational '
@@ -210,7 +210,7 @@ def main():
         mdtm_j.cube += tmp.cube
         edtm_tot += edtm
         mdtm_tot += mdtm
-        print(f'{state:5d} {fchk_au[state-1]*au2ev:12.6f} '
+        print(f'{state:5d} {fchk_au[state-1]*AU2EV:12.6f} '
               f'{fit_ev[state]:11.6f} {fac[state]:12.5E}   '
               f'{fmt_vec(edtm)}   {fmt_vec(mdtm)}')
     print(f'{"Total":>43}   {fmt_vec(edtm_tot)}   {fmt_vec(mdtm_tot)}')

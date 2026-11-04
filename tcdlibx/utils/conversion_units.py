@@ -5,6 +5,10 @@ from estampes.data.physics import PHYSFACT, PHYSCNST, phys_fact
 m2ang = 1.0e10
 hbar = PHYSCNST.planck*m2ang**2/(2*np.pi*PHYSFACT.amu2kg)
 hc = PHYSCNST.planck*PHYSCNST.slight*1.0e18
+# -- Conversion from Hartree to eV
+AU2EV = PHYSFACT.Eh2J/PHYSFACT.e2C
+# -- Normal-mode derivatives, from sqrt(amu).bohr (fchk) to sqrt(me).bohr (au)
+DQ_AMU2AU = np.sqrt(phys_fact("au2amu"))
 # -- Conversion from mass-weighted to dimensionless normal coords
 MWQ2q = 1./(np.sqrt(2*np.pi*PHYSCNST.slight/hbar)*PHYSFACT.bohr2ang)
 # -- Conversion from sqrt(Eh/amu) to cm^-1
@@ -13,9 +17,9 @@ eval2cm2 = MWQ2q**2/hc * PHYSFACT.Eh2J*1.0e18
 edip_conv = phys_fact("au2esu")*PHYSFACT.bohr2ang*1.0e-8
 # -- Magnetic dipole from au to statA.cm^2
 mdip_conv = 1.0e4*PHYSCNST.planck/(2*np.pi)*phys_fact("au2esu") / PHYSFACT.amu2kg
-# -- IR to epsilon
+# -- IR to epsilon: eps = IR2EPS*nu*D*g, D in 1e-40 esu^2.cm^2, nu in cm^-1
 IR2EPS = 1.0e-47*8.*np.pi**3*PHYSCNST.avogadro / (3000.*PHYSCNST.planck*PHYSCNST.slight*np.log(10))
-# -- VCD to Depsilon
+# -- VCD to Depsilon: Deps = VCD2DE*nu*R*g, R in 1e-44 esu^2.cm^2
 VCD2DE = 1.0e-51*32.*np.pi**3*PHYSCNST.avogadro / (3000.*PHYSCNST.planck*PHYSCNST.slight*np.log(10))
 ds_fact = MWQ2q**2 * edip_conv**2*1.0e40/2.
 rs_fact = edip_conv*mdip_conv*1.0e44/PHYSCNST.slight
